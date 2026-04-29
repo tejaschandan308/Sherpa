@@ -13,14 +13,54 @@ export interface Place {
   category: 'sight' | 'food' | 'stay'
   description: string
   whyItMadeTheCut: string
+  photoUrl?: string
 }
 
 export interface RecommendationsResponse {
   places: Place[]
 }
 
-// Initialise once at module level so the connection is reused across requests
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+// Fetches one photo URL for a named place using the Google Places API (New).
+// Returns null if the place isn't found or any request fails — callers should
+// treat a missing photo as a graceful fallback, not an error.
+async function fetchPlacePhoto(placeName: string, destination: string): Promise<string | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) return null
+
+  try {
+    // Step 1: text search to get the photo resource name
+    const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.photos',
+      },
+      body: JSON.stringify({ textQuery: `${placeName} ${destination}` }),
+    })
+
+    if (!searchRes.ok) return null
+
+    const searchData = await searchRes.json()
+    const photoName: string | undefined = searchData.places?.[0]?.photos?.[0]?.name
+    if (!photoName) return null
+
+    // Step 2: fetch the photo URI (skipHttpRedirect returns JSON instead of a 302)
+    const mediaRes = await fetch(
+      `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=600&skipHttpRedirect=true`,
+      { headers: { 'X-Goog-Api-Key': apiKey } }
+    )
+
+    if (!mediaRes.ok) return null
+
+    const mediaData = await mediaRes.json()
+    return typeof mediaData.photoUri === 'string' ? mediaData.photoUri : null
+  } catch {
+    return null
+  }
+}
 
 export async function POST(request: Request) {
   const body: RequestBody = await request.json()
@@ -66,13 +106,22 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
       return Response.json({ error: 'Unexpected response type from Claude' }, { status: 500 })
     }
 
-    // Claude should return raw JSON, but strip markdown code fences defensively
     const raw = content.text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '')
-
     const parsed: RecommendationsResponse = JSON.parse(raw)
-    return Response.json(parsed)
+
+    // Fetch one photo per place in parallel; individual failures return null gracefully
+    const photoResults = await Promise.allSettled(
+      parsed.places.map((place) => fetchPlacePhoto(place.name, destination))
+    )
+
+    const places: Place[] = parsed.places.map((place, i) => ({
+      ...place,
+      photoUrl: photoResults[i].status === 'fulfilled' ? (photoResults[i].value ?? undefined) : undefined,
+    }))
+
+    return Response.json({ places })
   } catch (err) {
-    console.error('Anthropic API error:', err)
+    console.error('Recommend API error:', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
     return Response.json({ error: message }, { status: 500 })
   }

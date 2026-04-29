@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { MapPin, Utensils, Bed, type LucideIcon } from 'lucide-react'
 import type { Place } from '../api/recommend/route'
@@ -11,7 +12,6 @@ interface TripMeta {
   endDate: string
 }
 
-// Extends TripMeta with the fields the API route needs
 interface PendingTrip extends TripMeta {
   travelStyles: string[]
   pace: string
@@ -36,7 +36,6 @@ const CATEGORY_BADGE: Record<Place['category'], { label: string; className: stri
   stay: { label: 'Stay', className: 'bg-indigo-100 text-indigo-700', Icon: Bed },
 }
 
-// Converts a YYYY-MM-DD string to a readable date without timezone shifting
 function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number)
   return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
@@ -48,26 +47,24 @@ function formatDate(iso: string): string {
 
 function LoadingScreen({ destination, messageIndex }: { destination: string; messageIndex: number }) {
   return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center px-4">
       <div className="text-center space-y-6 max-w-sm w-full">
-        {/* Three staggered pulsing dots */}
         <div className="flex justify-center gap-1.5">
           {[0, 1, 2].map((i) => (
             <span
               key={i}
-              className="w-2 h-2 bg-stone-400 rounded-full animate-pulse"
+              className="w-2 h-2 bg-[#B07242] rounded-full animate-pulse"
               style={{ animationDelay: `${i * 200}ms` }}
             />
           ))}
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-stone-900">
+          <h1 className="text-2xl font-bold text-[#1A1A1A]">
             Sherpa is curating your shortlist
           </h1>
-          <p className="text-stone-500 text-sm">Researching {destination}...</p>
+          <p className="text-[#6B6B6B] text-sm">Researching {destination}...</p>
         </div>
-        {/* Rotating status message — min-h prevents layout shift on text change */}
-        <p className="text-stone-400 text-sm min-h-[1.25rem]">
+        <p className="text-[#9A9087] text-sm min-h-[1.25rem]">
           {LOADING_MESSAGES[messageIndex]}
         </p>
       </div>
@@ -81,7 +78,6 @@ export default function ResultsPage() {
   const [trip, setTrip] = useState<TripMeta | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Prevents a flash of the empty state before sessionStorage is checked
   const [checked, setChecked] = useState(false)
   const [messageIndex, setMessageIndex] = useState(0)
 
@@ -89,7 +85,6 @@ export default function ResultsPage() {
     const rawPlaces = sessionStorage.getItem('sherpa_recommendations')
     const rawTrip = sessionStorage.getItem('sherpa_trip')
 
-    // We already have results from a previous or completed run
     if (rawPlaces && rawTrip) {
       setPlaces(JSON.parse(rawPlaces))
       setTrip(JSON.parse(rawTrip))
@@ -97,7 +92,6 @@ export default function ResultsPage() {
       return
     }
 
-    // A fresh form submission — form data is waiting for us to call the API
     const rawPending = sessionStorage.getItem('sherpa_pending_trip')
     if (!rawPending) {
       setChecked(true)
@@ -132,7 +126,7 @@ export default function ResultsPage() {
       })
   }, [])
 
-  // Rotate loading messages every 2 seconds while the API call is in flight
+  // Rotate loading messages every 2 seconds while fetching
   useEffect(() => {
     if (!isLoading) return
     const interval = setInterval(() => {
@@ -141,9 +135,8 @@ export default function ResultsPage() {
     return () => clearInterval(interval)
   }, [isLoading])
 
-  // Before the first useEffect has run — render background only to avoid flash
   if (!checked) {
-    return <div className="min-h-screen bg-stone-50" />
+    return <div className="min-h-screen bg-[#FAFAF7]" />
   }
 
   if (isLoading && trip) {
@@ -152,12 +145,12 @@ export default function ResultsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <div className="text-center space-y-4">
-          <p className="text-stone-500">{error}</p>
+          <p className="text-[#6B6B6B]">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="text-sm text-stone-700 underline underline-offset-2"
+            className="text-sm text-[#3D3830] underline underline-offset-2"
           >
             Try again
           </button>
@@ -168,12 +161,12 @@ export default function ResultsPage() {
 
   if (!places || !trip) {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
         <div className="text-center space-y-4">
-          <p className="text-stone-500">No recommendations found.</p>
+          <p className="text-[#6B6B6B]">No recommendations found.</p>
           <button
             onClick={() => router.push('/')}
-            className="text-sm text-stone-700 underline underline-offset-2"
+            className="text-sm text-[#3D3830] underline underline-offset-2"
           >
             Plan a trip
           </button>
@@ -183,16 +176,16 @@ export default function ResultsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-50 px-4 py-16">
-      <div className="max-w-2xl mx-auto space-y-12">
+    <div className="min-h-screen bg-[#FAFAF7] px-4 py-16 animate-fade-in-up">
+      <div className="max-w-4xl mx-auto space-y-12">
 
-        {/* Trip header — bigger heading, more whitespace */}
+        {/* Trip header */}
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-stone-400 tracking-widest uppercase">
+          <p className="text-xs font-semibold text-[#9A9087] tracking-widest uppercase">
             Your Sherpa shortlist
           </p>
-          <h1 className="text-4xl font-bold tracking-tight text-stone-900">{trip.destination}</h1>
-          <p className="text-stone-500 text-sm">
+          <h1 className="text-4xl font-bold tracking-tight text-[#1A1A1A]">{trip.destination}</h1>
+          <p className="text-[#6B6B6B] text-sm">
             {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
           </p>
         </div>
@@ -206,36 +199,54 @@ export default function ResultsPage() {
             return (
               <section key={category}>
                 <div className="flex items-baseline gap-2 mb-4">
-                  <h2 className="text-lg font-bold text-stone-900">{heading}</h2>
-                  <span className="text-sm text-stone-400">({sectionPlaces.length})</span>
+                  <h2 className="text-lg font-bold text-[#1A1A1A]">{heading}</h2>
+                  <span className="text-sm text-[#9A9087]">({sectionPlaces.length})</span>
                 </div>
 
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {sectionPlaces.map((place, i) => {
                     const { label, className, Icon } = CATEGORY_BADGE[place.category]
                     return (
                       <div
                         key={i}
-                        className="bg-white rounded-2xl border border-stone-200 shadow-sm p-6 space-y-3 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 cursor-default"
+                        className="flex flex-col h-full bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 cursor-default"
                       >
-                        {/* Name + category badge with icon */}
-                        <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-lg font-bold text-stone-900 leading-snug">{place.name}</h3>
-                          <span className={`shrink-0 flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${className}`}>
-                            <Icon size={11} strokeWidth={2.5} />
-                            {label}
-                          </span>
-                        </div>
+                        {/* Photo — full-width at top, or gray placeholder if missing */}
+                        {place.photoUrl ? (
+                          <div className="relative h-48 w-full">
+                            <Image
+                              src={place.photoUrl}
+                              alt={place.name}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 448px"
+                            />
+                          </div>
+                        ) : (
+                          <div className="h-48 w-full bg-stone-100" />
+                        )}
 
-                        {/* Description */}
-                        <p className="text-stone-600 text-sm leading-relaxed">{place.description}</p>
+                        {/* Card body */}
+                        <div className="flex-1 p-6 space-y-3">
+                          {/* Name + category badge */}
+                          <div className="flex items-start justify-between gap-3">
+                            <h3 className="text-lg font-bold text-[#1A1A1A] leading-snug">{place.name}</h3>
+                            <span className={`shrink-0 flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${className}`}>
+                              <Icon size={11} strokeWidth={2.5} />
+                              {label}
+                            </span>
+                          </div>
 
-                        {/* Why this made the cut */}
-                        <div className="pt-2 border-t border-stone-100">
-                          <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">
-                            Why this made the cut
-                          </p>
-                          <p className="text-stone-700 text-sm leading-relaxed">{place.whyItMadeTheCut}</p>
+                          {/* Description */}
+                          <p className="text-[#6B6B6B] text-sm leading-relaxed">{place.description}</p>
+
+                          {/* Why this made the cut */}
+                          <div className="pt-2 border-t border-stone-100">
+                            <p className="text-xs font-semibold text-[#9A9087] uppercase tracking-wide mb-1">
+                              Why this made the cut
+                            </p>
+                            <p className="text-[#3D3830] text-sm leading-relaxed">{place.whyItMadeTheCut}</p>
+                          </div>
                         </div>
                       </div>
                     )
@@ -246,11 +257,11 @@ export default function ResultsPage() {
           })}
         </div>
 
-        {/* More prominent "Plan another trip" button */}
-        <div className="text-center pt-4">
+        {/* Plan another trip — prominent terracotta button */}
+        <div className="text-center pt-4 pb-8">
           <button
             onClick={() => router.push('/')}
-            className="bg-stone-900 text-white font-medium px-8 py-3 rounded-lg hover:bg-stone-700 active:bg-stone-800 transition"
+            className="bg-[#B07242] text-white font-medium px-8 py-3 rounded-lg hover:bg-[#8F5B2D] active:bg-[#7A4A22] transition"
           >
             Plan another trip
           </button>
