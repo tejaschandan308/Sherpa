@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { MapPin, Utensils, Bed, Star, type LucideIcon } from 'lucide-react'
+import { MapPin, Utensils, Bed, Star, Cloud, type LucideIcon } from 'lucide-react'
 import type { Place, PlaceReview } from '../api/recommend/route'
 
 interface TripMeta {
   destination: string
   startDate: string
   endDate: string
+  weatherSummary?: string
 }
 
 interface PendingTrip extends TripMeta {
@@ -146,11 +147,17 @@ export default function ResultsPage() {
         return res.json()
       })
       .then((data) => {
-        const tripMeta = { destination: pending.destination, startDate: pending.startDate, endDate: pending.endDate }
+        const tripMeta: TripMeta = {
+          destination: pending.destination,
+          startDate: pending.startDate,
+          endDate: pending.endDate,
+          weatherSummary: data.weatherSummary,
+        }
         sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
         sessionStorage.setItem('sherpa_trip', JSON.stringify(tripMeta))
         sessionStorage.removeItem('sherpa_pending_trip')
         setPlaces(data.places)
+        setTrip(tripMeta)
         setIsLoading(false)
       })
       .catch((err) => {
@@ -222,6 +229,19 @@ export default function ResultsPage() {
             {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
           </p>
         </div>
+
+        {/* Weather note — only shown when Claude returned a weatherSummary */}
+        {trip.weatherSummary && (
+          <div className="flex items-start gap-3 bg-sky-50/70 border border-sky-100 rounded-xl px-4 py-3">
+            <Cloud size={15} className="text-sky-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-[10px] font-semibold text-sky-500 uppercase tracking-wider mb-0.5">
+                Weather note
+              </p>
+              <p className="text-sm text-[#3D3830] leading-relaxed">{trip.weatherSummary}</p>
+            </div>
+          </div>
+        )}
 
         {/* Recommendations grouped by category */}
         <div className="space-y-10">

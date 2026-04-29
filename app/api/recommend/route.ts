@@ -28,9 +28,11 @@ export interface Place {
 
 export interface RecommendationsResponse {
   places: Place[]
+  weatherSummary?: string
 }
 
-// Internal shape of data fetched from Google Places per place
+// --- Internal types ---
+
 interface PlaceGoogleData {
   photoUrl: string | null
   rating: number | null
@@ -38,7 +40,6 @@ interface PlaceGoogleData {
   reviews: PlaceReview[]
 }
 
-// Loosely typed to match whatever the Places API returns before we normalise it
 interface GoogleReview {
   rating?: number
   text?: { text?: string }
@@ -47,16 +48,151 @@ interface GoogleReview {
   authorAttribution?: { displayName?: string }
 }
 
+interface Coordinates {
+  lat: number
+  lng: number
+}
+
+// Loosely typed to match the OpenWeather API shape before we normalise it
+interface ForecastItem {
+  dt: number
+  main: { temp: number }
+  weather: { main: string }[]
+  rain?: { '3h'?: number }
+  pop?: number
+}
+
+// --- Clients ---
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Strips the surname down to an initial for privacy: "Jane Doe" → "Jane D."
+// --- Helpers ---
+
 function formatAuthorName(displayName: string): string {
   const parts = displayName.trim().split(/\s+/)
   if (parts.length === 1) return parts[0]
   return `${parts[0]} ${parts[parts.length - 1][0]}.`
 }
 
-// Fetches photo, rating, review count, and up to 3 reviews for a place.
+// Geocodes a free-text destination into coordinates using the Google Geocoding API.
+// Returns null on any failure so callers can skip weather gracefully.
+async function fetchCoordinates(destination: string): Promise<Coordinates | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}&key=${apiKey}`
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    const loc = data.results?.[0]?.geometry?.location
+    if (!loc) return null
+    return { lat: loc.lat, lng: loc.lng }
+  } catch {
+    return null
+  }
+}
+
+// Builds a weather context string for Claude.
+// Within 16 days of the trip: calls the OpenWeather forecast endpoint and summarises
+// temperatures, dominant conditions, and likely rainy days.
+// Beyond 16 days: returns a prompt telling Claude to use its seasonal knowledge instead.
+// Returns null on any failure so the Claude call proceeds without weather context.
+async function fetchWeatherContext(
+  lat: number,
+  lng: number,
+  destination: string,
+  startDate: string,
+  endDate: string
+): Promise<string | null> {
+  const apiKey = process.env.OPENWEATHER_API_KEY
+  if (!apiKey) return null
+
+  // Parse as local midnight to avoid UTC date-shift issues in the day-count
+  const [sy, sm, sd] = startDate.split('-').map(Number)
+  const tripStart = new Date(sy, sm - 1, sd)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const daysUntilTrip = Math.round((tripStart.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+
+  const monthName = tripStart.toLocaleString('en-US', { month: 'long' })
+
+  if (daysUntilTrip > 16) {
+    return (
+      `Trip is too far out for a real forecast — use your general seasonal knowledge ` +
+      `for ${destination} in ${monthName}.`
+    )
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lng}&units=metric&appid=${apiKey}`
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+
+    // Filter to items whose UTC date falls within the trip window
+    const tripForecasts: ForecastItem[] = (data.list ?? []).filter((item: ForecastItem) => {
+      const itemDate = new Date(item.dt * 1000).toISOString().slice(0, 10)
+      return itemDate >= startDate && itemDate <= endDate
+    })
+
+    if (tripForecasts.length === 0) {
+      return (
+        `Forecast data doesn't cover these exact dates — use your general seasonal knowledge ` +
+        `for ${destination} in ${monthName}.`
+      )
+    }
+
+    const temps = tripForecasts.map((f) => f.main.temp)
+    const minTemp = Math.round(Math.min(...temps))
+    const maxTemp = Math.round(Math.max(...temps))
+
+    // Count distinct calendar days that look rainy (>40% precipitation probability, or rain in code)
+    const rainyDays = new Set(
+      tripForecasts
+        .filter(
+          (f) =>
+            (f.rain?.['3h'] ?? 0) > 0 ||
+            (f.pop ?? 0) > 0.4 ||
+            ['Rain', 'Drizzle', 'Thunderstorm'].includes(f.weather[0]?.main ?? '')
+        )
+        .map((f) => new Date(f.dt * 1000).toISOString().slice(0, 10))
+    ).size
+
+    // Dominant weather condition across all forecast items
+    const conditionCounts: Record<string, number> = {}
+    for (const f of tripForecasts) {
+      const main = f.weather[0]?.main ?? 'Unknown'
+      conditionCounts[main] = (conditionCounts[main] ?? 0) + 1
+    }
+    const dominant =
+      Object.entries(conditionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'mixed'
+
+    const conditionLabel: Record<string, string> = {
+      Clear: 'mostly sunny',
+      Clouds: 'partly cloudy',
+      Rain: 'rainy',
+      Drizzle: 'drizzly',
+      Thunderstorm: 'stormy',
+      Snow: 'snowy',
+      Mist: 'misty',
+      Fog: 'foggy',
+    }
+    const conditionDesc = conditionLabel[dominant] ?? dominant.toLowerCase()
+    const rainNote =
+      rainyDays > 0
+        ? `, ${rainyDays} rainy day${rainyDays > 1 ? 's' : ''} likely`
+        : ', no significant rain expected'
+
+    return `Forecast for these dates: temperatures around ${minTemp}–${maxTemp}°C, ${conditionDesc}${rainNote}.`
+  } catch {
+    return null
+  }
+}
+
+// Fetches photo, rating, review count, and up to 3 reviews for a named place.
 // All fields return null / empty on any failure so callers degrade gracefully.
 async function fetchPlaceData(placeName: string, destination: string): Promise<PlaceGoogleData> {
   const empty: PlaceGoogleData = { photoUrl: null, rating: null, userRatingCount: null, reviews: [] }
@@ -106,7 +242,8 @@ async function fetchPlaceData(placeName: string, destination: string): Promise<P
     return {
       photoUrl,
       rating: typeof googlePlace.rating === 'number' ? googlePlace.rating : null,
-      userRatingCount: typeof googlePlace.userRatingCount === 'number' ? googlePlace.userRatingCount : null,
+      userRatingCount:
+        typeof googlePlace.userRatingCount === 'number' ? googlePlace.userRatingCount : null,
       reviews,
     }
   } catch {
@@ -120,11 +257,22 @@ export async function POST(request: Request) {
 
   const styleList = travelStyles.length > 0 ? travelStyles.join(', ') : 'general interest'
 
+  // Geocode → weather context (both steps skip gracefully on failure)
+  const coords = await fetchCoordinates(destination)
+  const weatherContext = coords
+    ? await fetchWeatherContext(coords.lat, coords.lng, destination, startDate, endDate)
+    : null
+
+  // Injected verbatim into the user message only when weather data was obtained
+  const weatherSection = weatherContext ? `\nWeather context for this trip:\n${weatherContext}\n` : ''
+
   try {
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: `You are Sherpa, an opinionated travel co-pilot for solo travellers. You curate a tight shortlist of places worth visiting — not a generic tourist guide. You prioritise authenticity over popularity and always explain your reasoning in terms of the specific traveller's style.
+
+When weather data is provided, weave it into your "whyItMadeTheCut" reasoning only where it genuinely changes the recommendation — skip beach activities on rainy days, highlight perfect seasonal timing, flag indoor alternatives in bad weather. Don't mention weather on every place; only where it actually matters.
 
 Your output must be ONLY valid JSON, with no explanation, no markdown, and no code fences — just the raw JSON object.`,
       messages: [
@@ -135,15 +283,16 @@ Your output must be ONLY valid JSON, with no explanation, no markdown, and no co
 Traveller profile:
 - Style tags: ${styleList}
 - Pace preference: ${pace}
-
+${weatherSection}
 Return exactly 8 recommended places as JSON in this exact format:
 {
+  "weatherSummary": "string — 1-2 sentences on what the conditions mean for this trip (omit this field entirely if no weather data was provided)",
   "places": [
     {
       "name": "string",
       "category": "sight" | "food" | "stay",
       "description": "string — 2 sentences about the place itself",
-      "whyItMadeTheCut": "string — 1-2 sentences specific to this traveller's style tags and pace"
+      "whyItMadeTheCut": "string — 1-2 sentences specific to this traveller's style, pace, and weather where relevant"
     }
   ]
 }
@@ -181,7 +330,7 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
       }
     })
 
-    return Response.json({ places })
+    return Response.json({ places, weatherSummary: parsed.weatherSummary })
   } catch (err) {
     console.error('Recommend API error:', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
