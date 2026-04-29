@@ -28,7 +28,18 @@ interface TripFormData {
   pace: Pace
 }
 
+// Returns today's date as YYYY-MM-DD in the user's local timezone
+function getToday(): string {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 export default function TripForm() {
+  const today = getToday()
+
   // Single state object for all form fields
   const [formData, setFormData] = useState<TripFormData>({
     destination: '',
@@ -93,9 +104,16 @@ export default function TripForm() {
                 id="startDate"
                 type="date"
                 value={formData.startDate}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, startDate: e.target.value }))
-                }
+                min={today}
+                onChange={(e) => {
+                  const newStart = e.target.value
+                  setFormData((prev) => ({
+                    ...prev,
+                    startDate: newStart,
+                    // Clear end date if it's now before the new start date
+                    endDate: prev.endDate && prev.endDate < newStart ? '' : prev.endDate,
+                  }))
+                }}
                 required
                 className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-transparent transition"
               />
@@ -108,6 +126,7 @@ export default function TripForm() {
                 id="endDate"
                 type="date"
                 value={formData.endDate}
+                min={formData.startDate || today}
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, endDate: e.target.value }))
                 }
