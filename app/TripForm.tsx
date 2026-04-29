@@ -96,6 +96,9 @@ export default function TripForm() {
           required
           className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-[#1A1A1A] placeholder:text-stone-400 bg-white focus:outline-none focus:ring-2 focus:ring-stone-300 focus:border-transparent transition"
         />
+        <p className="text-xs text-[#9A9087]">
+          Works best with a specific city or region (e.g., &lsquo;Lisbon&rsquo; or &lsquo;Algarve&rsquo; rather than &lsquo;Portugal&rsquo;)
+        </p>
       </div>
 
       {/* Dates — side by side */}

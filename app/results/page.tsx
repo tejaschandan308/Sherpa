@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { MapPin, Utensils, Bed, Star, Cloud, type LucideIcon } from 'lucide-react'
+import { MapPin, Utensils, Bed, Star, Cloud, Train, Car, Footprints, type LucideIcon } from 'lucide-react'
 import type { Place, PlaceReview } from '../api/recommend/route'
 
 interface TripMeta {
@@ -323,6 +323,36 @@ export default function ResultsPage() {
                                     ))}
                                   </div>
                                 </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Distance + transit info */}
+                          {place.distanceText && (
+                            <div className="flex items-center gap-2 text-xs text-[#9A9087] flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <MapPin size={12} strokeWidth={1.5} />
+                                {place.distanceText}
+                              </span>
+                              {place.durationText && (
+                                <>
+                                  <span aria-hidden>·</span>
+                                  <span className="flex items-center gap-1">
+                                    {place.transitLabel === 'Walkable' ? (
+                                      <Footprints size={12} strokeWidth={1.5} />
+                                    ) : place.transitLabel === 'Transit accessible' ? (
+                                      <Train size={12} strokeWidth={1.5} />
+                                    ) : (
+                                      <Car size={12} strokeWidth={1.5} />
+                                    )}
+                                    {place.durationText}
+                                  </span>
+                                </>
+                              )}
+                              {place.transitLabel && (
+                                <span className="bg-stone-100 text-[#9A9087] px-2 py-0.5 rounded-full text-[10px] font-medium">
+                                  {place.transitLabel}
+                                </span>
                               )}
                             </div>
                           )}

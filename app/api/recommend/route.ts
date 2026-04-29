@@ -24,6 +24,10 @@ export interface Place {
   rating?: number
   userRatingCount?: number
   reviews?: PlaceReview[]
+  distanceText?: string
+  distanceMeters?: number
+  durationText?: string
+  transitLabel?: 'Walkable' | 'Transit accessible' | 'Best by taxi'
 }
 
 export interface RecommendationsResponse {
@@ -38,6 +42,20 @@ interface PlaceGoogleData {
   rating: number | null
   userRatingCount: number | null
   reviews: PlaceReview[]
+  location: Coordinates | null
+}
+
+interface TransitInfo {
+  distanceText: string
+  distanceMeters: number
+  durationText?: string
+  transitLabel: 'Walkable' | 'Transit accessible' | 'Best by taxi'
+}
+
+interface DistanceMatrixElement {
+  status: string
+  distance?: { text: string; value: number }
+  duration?: { text: string; value: number }
 }
 
 interface GoogleReview {
@@ -195,7 +213,7 @@ async function fetchWeatherContext(
 // Fetches photo, rating, review count, and up to 3 reviews for a named place.
 // All fields return null / empty on any failure so callers degrade gracefully.
 async function fetchPlaceData(placeName: string, destination: string): Promise<PlaceGoogleData> {
-  const empty: PlaceGoogleData = { photoUrl: null, rating: null, userRatingCount: null, reviews: [] }
+  const empty: PlaceGoogleData = { photoUrl: null, rating: null, userRatingCount: null, reviews: [], location: null }
   const apiKey = process.env.GOOGLE_MAPS_API_KEY
   if (!apiKey) return empty
 
@@ -205,7 +223,7 @@ async function fetchPlaceData(placeName: string, destination: string): Promise<P
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.photos,places.rating,places.userRatingCount,places.reviews',
+        'X-Goog-FieldMask': 'places.photos,places.rating,places.userRatingCount,places.reviews,places.location',
       },
       body: JSON.stringify({ textQuery: `${placeName} ${destination}` }),
     })
@@ -239,15 +257,92 @@ async function fetchPlaceData(placeName: string, destination: string): Promise<P
       relativePublishTimeDescription: r.relativePublishTimeDescription ?? '',
     }))
 
+    // Location — Places API (New) returns { latitude, longitude } under the "location" field
+    const locData = googlePlace.location
+    const location: Coordinates | null =
+      locData && typeof locData.latitude === 'number' && typeof locData.longitude === 'number'
+        ? { lat: locData.latitude, lng: locData.longitude }
+        : null
+
     return {
       photoUrl,
       rating: typeof googlePlace.rating === 'number' ? googlePlace.rating : null,
       userRatingCount:
         typeof googlePlace.userRatingCount === 'number' ? googlePlace.userRatingCount : null,
       reviews,
+      location,
     }
   } catch {
     return empty
+  }
+}
+
+// Batches all place locations into a single Distance Matrix call and returns transit info per place.
+// Uses transit mode; falls back to estimated walk time for places under 1.5 km.
+async function fetchTransitData(
+  cityCoords: Coordinates,
+  placeLocations: (Coordinates | null)[]
+): Promise<(TransitInfo | null)[]> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) return placeLocations.map(() => null)
+
+  // Build destinations string from only the places where we have coordinates
+  const validIndices: number[] = []
+  const destinationParts: string[] = []
+  for (let i = 0; i < placeLocations.length; i++) {
+    const loc = placeLocations[i]
+    if (loc) {
+      validIndices.push(i)
+      destinationParts.push(`${loc.lat},${loc.lng}`)
+    }
+  }
+  if (destinationParts.length === 0) return placeLocations.map(() => null)
+
+  try {
+    const url =
+      `https://maps.googleapis.com/maps/api/distancematrix/json` +
+      `?origins=${cityCoords.lat},${cityCoords.lng}` +
+      `&destinations=${destinationParts.join('|')}` +
+      `&mode=transit` +
+      `&key=${apiKey}`
+
+    const res = await fetch(url)
+    if (!res.ok) return placeLocations.map(() => null)
+
+    const data = await res.json()
+    const elements: DistanceMatrixElement[] = data.rows?.[0]?.elements ?? []
+
+    const result: (TransitInfo | null)[] = placeLocations.map(() => null)
+
+    for (let j = 0; j < validIndices.length; j++) {
+      const idx = validIndices[j]
+      const el = elements[j]
+      if (!el?.distance) continue
+
+      const distanceMeters = el.distance.value
+      const distanceText = el.distance.text
+      let transitLabel: TransitInfo['transitLabel']
+      let durationText: string | undefined
+
+      if (distanceMeters < 1500) {
+        transitLabel = 'Walkable'
+        const walkMins = Math.max(1, Math.round(distanceMeters / 83))
+        durationText = `${walkMins} min walk`
+      } else if (el.status === 'OK' && el.duration) {
+        const durationMins = Math.round(el.duration.value / 60)
+        transitLabel = durationMins < 60 ? 'Transit accessible' : 'Best by taxi'
+        durationText = `${durationMins} min by transit`
+      } else {
+        transitLabel = 'Best by taxi'
+        durationText = undefined
+      }
+
+      result[idx] = { distanceText, distanceMeters, durationText, transitLabel }
+    }
+
+    return result
+  } catch {
+    return placeLocations.map(() => null)
   }
 }
 
@@ -315,11 +410,21 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
       parsed.places.map((place) => fetchPlaceData(place.name, destination))
     )
 
+    // Extract the per-place coordinates we just fetched, then run a single batched Distance Matrix call
+    const placeLocations = googleDataResults.map((r) =>
+      r.status === 'fulfilled' ? r.value.location : null
+    )
+    const transitResults: (TransitInfo | null)[] = coords
+      ? await fetchTransitData(coords, placeLocations)
+      : placeLocations.map(() => null)
+
     const places: Place[] = parsed.places.map((place, i) => {
       const data: PlaceGoogleData =
         googleDataResults[i].status === 'fulfilled'
           ? googleDataResults[i].value
-          : { photoUrl: null, rating: null, userRatingCount: null, reviews: [] }
+          : { photoUrl: null, rating: null, userRatingCount: null, reviews: [], location: null }
+
+      const transit = transitResults[i]
 
       return {
         ...place,
@@ -327,6 +432,12 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
         rating: data.rating ?? undefined,
         userRatingCount: data.userRatingCount ?? undefined,
         reviews: data.reviews.length > 0 ? data.reviews : undefined,
+        ...(transit && {
+          distanceText: transit.distanceText,
+          distanceMeters: transit.distanceMeters,
+          durationText: transit.durationText,
+          transitLabel: transit.transitLabel,
+        }),
       }
     })
 
