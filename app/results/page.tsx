@@ -5,6 +5,8 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { MapPin, Utensils, Bed, Star, Cloud, Train, Car, Footprints, type LucideIcon } from 'lucide-react'
 import type { Place, PlaceReview } from '../api/recommend/route'
+import { saveTrip, getTrip, type SavedTrip } from '../lib/trips'
+import SherpaNav from '../components/SherpaNav'
 
 interface TripMeta {
   destination: string
@@ -81,7 +83,9 @@ function ReviewRow({ review, isFirst }: { review: PlaceReview; isFirst: boolean 
 
 function LoadingScreen({ destination, messageIndex }: { destination: string; messageIndex: number }) {
   return (
-    <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+      <SherpaNav />
+      <div className="flex-1 flex items-center justify-center px-4">
       <div className="text-center space-y-6 max-w-sm w-full">
         <div className="flex justify-center gap-1.5">
           {[0, 1, 2].map((i) => (
@@ -102,6 +106,7 @@ function LoadingScreen({ destination, messageIndex }: { destination: string; mes
           {LOADING_MESSAGES[messageIndex]}
         </p>
       </div>
+      </div>
     </div>
   )
 }
@@ -116,6 +121,28 @@ export default function ResultsPage() {
   const [messageIndex, setMessageIndex] = useState(0)
 
   useEffect(() => {
+    // If a tripId param is present, load directly from localStorage (no API call needed)
+    const urlParams = new URLSearchParams(window.location.search)
+    const tripIdParam = urlParams.get('tripId')
+
+    if (tripIdParam) {
+      const saved = getTrip(parseInt(tripIdParam, 10))
+      if (!saved) {
+        router.replace('/trips')
+        return
+      }
+      setPlaces(saved.places)
+      setTrip({
+        destination: saved.destination,
+        startDate: saved.startDate,
+        endDate: saved.endDate,
+        weatherSummary: saved.weatherSummary,
+      })
+      setChecked(true)
+      return
+    }
+
+    // --- New trip flow: read from sessionStorage, call API ---
     const rawPlaces = sessionStorage.getItem('sherpa_recommendations')
     const rawTrip = sessionStorage.getItem('sherpa_trip')
 
@@ -156,6 +183,23 @@ export default function ResultsPage() {
         sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
         sessionStorage.setItem('sherpa_trip', JSON.stringify(tripMeta))
         sessionStorage.removeItem('sherpa_pending_trip')
+
+        // Auto-save to localStorage and update URL to reflect the saved trip ID
+        const now = Date.now()
+        const newTrip: SavedTrip = {
+          id: now,
+          destination: pending.destination,
+          startDate: pending.startDate,
+          endDate: pending.endDate,
+          styleTags: pending.travelStyles,
+          pace: pending.pace,
+          weatherSummary: data.weatherSummary,
+          places: data.places,
+          savedAt: now,
+        }
+        saveTrip(newTrip)
+        window.history.replaceState(null, '', `/results?tripId=${now}`)
+
         setPlaces(data.places)
         setTrip(tripMeta)
         setIsLoading(false)
@@ -185,15 +229,18 @@ export default function ResultsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <p className="text-[#6B6B6B]">{error}</p>
-          <button
-            onClick={() => router.push('/')}
-            className="text-sm text-[#3D3830] underline underline-offset-2"
-          >
-            Try again
-          </button>
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+        <SherpaNav />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <p className="text-[#6B6B6B]">{error}</p>
+            <button
+              onClick={() => router.push('/')}
+              className="text-sm text-[#3D3830] underline underline-offset-2"
+            >
+              Try again
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -201,22 +248,27 @@ export default function ResultsPage() {
 
   if (!places || !trip) {
     return (
-      <div className="min-h-screen bg-[#FAFAF7] flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <p className="text-[#6B6B6B]">No recommendations found.</p>
-          <button
-            onClick={() => router.push('/')}
-            className="text-sm text-[#3D3830] underline underline-offset-2"
-          >
-            Plan a trip
-          </button>
+      <div className="min-h-screen bg-[#FAFAF7] flex flex-col">
+        <SherpaNav />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <p className="text-[#6B6B6B]">No recommendations found.</p>
+            <button
+              onClick={() => router.push('/')}
+              className="text-sm text-[#3D3830] underline underline-offset-2"
+            >
+              Plan a trip
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAF7] px-4 py-16 animate-fade-in-up">
+    <div className="min-h-screen bg-[#FAFAF7] animate-fade-in-up">
+      <SherpaNav />
+      <div className="px-4 pb-16">
       <div className="max-w-4xl mx-auto space-y-12">
 
         {/* Trip header */}
@@ -384,6 +436,7 @@ export default function ResultsPage() {
           </button>
         </div>
 
+      </div>
       </div>
     </div>
   )

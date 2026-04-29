@@ -1,4 +1,5 @@
 import TripForm from './TripForm'
+import SherpaNav from './components/SherpaNav'
 
 // Layered mountain silhouette illustration — purely decorative, uses warm muted tones
 function MountainIllustration() {
@@ -44,10 +45,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#FAFAF7]">
 
-      {/* Wordmark — top-left, feels like a real product nav */}
-      <nav className="px-8 py-6">
-        <span className="text-[#1A1A1A] text-xl font-bold tracking-tight">Sherpa</span>
-      </nav>
+      <SherpaNav />
 
       {/* Hero — big headline + illustration side by side */}
       <section className="max-w-5xl mx-auto px-8 pt-6 pb-20 flex items-center gap-16">
