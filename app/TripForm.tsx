@@ -4,6 +4,7 @@
 // for anything that uses state, event handlers, or browser APIs in Next.js 15.
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 const TRAVEL_STYLE_OPTIONS = [
   'Foodie',
@@ -39,6 +40,7 @@ function getToday(): string {
 
 export default function TripForm() {
   const today = getToday()
+  const router = useRouter()
 
   // Single state object for all form fields
   const [formData, setFormData] = useState<TripFormData>({
@@ -48,6 +50,9 @@ export default function TripForm() {
     travelStyles: [],
     pace: 'Moderate',
   })
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Toggle a style tag: add it if absent, remove it if already selected
   function toggleStyle(style: TravelStyle) {
@@ -59,9 +64,40 @@ export default function TripForm() {
     }))
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault() // stop the browser from reloading the page on submit
-    console.log('Trip data:', formData)
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        throw new Error('Something went wrong. Please try again.')
+      }
+
+      const data = await response.json()
+
+      // Save the results to sessionStorage so the results page can read them
+      sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
+      sessionStorage.setItem(
+        'sherpa_trip',
+        JSON.stringify({
+          destination: formData.destination,
+          startDate: formData.startDate,
+          endDate: formData.endDate,
+        })
+      )
+
+      router.push('/results')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -192,10 +228,16 @@ export default function TripForm() {
           {/* Submit */}
           <button
             type="submit"
-            className="w-full bg-stone-900 text-white font-medium py-3 rounded-lg hover:bg-stone-700 active:bg-stone-800 transition"
+            disabled={isLoading}
+            className="w-full bg-stone-900 text-white font-medium py-3 rounded-lg hover:bg-stone-700 active:bg-stone-800 disabled:opacity-60 disabled:cursor-not-allowed transition"
           >
-            Plan my trip
+            {isLoading ? 'Sherpa is researching...' : 'Plan my trip'}
           </button>
+
+          {/* Error message — only shown when the API call fails */}
+          {error && (
+            <p className="text-sm text-red-600 text-center">{error}</p>
+          )}
 
         </form>
       </div>
