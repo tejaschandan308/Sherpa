@@ -64,38 +64,20 @@ export default function TripForm() {
     }))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
 
     try {
-      const response = await fetch('/api/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      })
-
-      if (!response.ok) {
-        throw new Error('Something went wrong. Please try again.')
-      }
-
-      const data = await response.json()
-
-      // Save the results to sessionStorage so the results page can read them
-      sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
-      sessionStorage.setItem(
-        'sherpa_trip',
-        JSON.stringify({
-          destination: formData.destination,
-          startDate: formData.startDate,
-          endDate: formData.endDate,
-        })
-      )
-
+      // Save form data for the results page to pick up, then navigate immediately
+      // so the loading experience happens there rather than on this form.
+      sessionStorage.setItem('sherpa_pending_trip', JSON.stringify(formData))
+      sessionStorage.removeItem('sherpa_recommendations')
+      sessionStorage.removeItem('sherpa_trip')
       router.push('/results')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+    } catch {
+      setError('Unable to save your trip. Please try again.')
       setIsLoading(false)
     }
   }
@@ -231,7 +213,7 @@ export default function TripForm() {
             disabled={isLoading}
             className="w-full bg-stone-900 text-white font-medium py-3 rounded-lg hover:bg-stone-700 active:bg-stone-800 disabled:opacity-60 disabled:cursor-not-allowed transition"
           >
-            {isLoading ? 'Sherpa is researching...' : 'Plan my trip'}
+            Plan my trip
           </button>
 
           {/* Error message — only shown when the API call fails */}
