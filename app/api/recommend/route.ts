@@ -8,57 +8,109 @@ interface RequestBody {
   pace: string
 }
 
+export interface PlaceReview {
+  authorName: string
+  rating: number
+  text: string
+  relativePublishTimeDescription: string
+}
+
 export interface Place {
   name: string
   category: 'sight' | 'food' | 'stay'
   description: string
   whyItMadeTheCut: string
   photoUrl?: string
+  rating?: number
+  userRatingCount?: number
+  reviews?: PlaceReview[]
 }
 
 export interface RecommendationsResponse {
   places: Place[]
 }
 
+// Internal shape of data fetched from Google Places per place
+interface PlaceGoogleData {
+  photoUrl: string | null
+  rating: number | null
+  userRatingCount: number | null
+  reviews: PlaceReview[]
+}
+
+// Loosely typed to match whatever the Places API returns before we normalise it
+interface GoogleReview {
+  rating?: number
+  text?: { text?: string }
+  originalText?: { text?: string }
+  relativePublishTimeDescription?: string
+  authorAttribution?: { displayName?: string }
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Fetches one photo URL for a named place using the Google Places API (New).
-// Returns null if the place isn't found or any request fails — callers should
-// treat a missing photo as a graceful fallback, not an error.
-async function fetchPlacePhoto(placeName: string, destination: string): Promise<string | null> {
+// Strips the surname down to an initial for privacy: "Jane Doe" → "Jane D."
+function formatAuthorName(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/)
+  if (parts.length === 1) return parts[0]
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`
+}
+
+// Fetches photo, rating, review count, and up to 3 reviews for a place.
+// All fields return null / empty on any failure so callers degrade gracefully.
+async function fetchPlaceData(placeName: string, destination: string): Promise<PlaceGoogleData> {
+  const empty: PlaceGoogleData = { photoUrl: null, rating: null, userRatingCount: null, reviews: [] }
   const apiKey = process.env.GOOGLE_MAPS_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) return empty
 
   try {
-    // Step 1: text search to get the photo resource name
     const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.photos',
+        'X-Goog-FieldMask': 'places.photos,places.rating,places.userRatingCount,places.reviews',
       },
       body: JSON.stringify({ textQuery: `${placeName} ${destination}` }),
     })
 
-    if (!searchRes.ok) return null
+    if (!searchRes.ok) return empty
 
     const searchData = await searchRes.json()
-    const photoName: string | undefined = searchData.places?.[0]?.photos?.[0]?.name
-    if (!photoName) return null
+    const googlePlace = searchData.places?.[0]
+    if (!googlePlace) return empty
 
-    // Step 2: fetch the photo URI (skipHttpRedirect returns JSON instead of a 302)
-    const mediaRes = await fetch(
-      `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=600&skipHttpRedirect=true`,
-      { headers: { 'X-Goog-Api-Key': apiKey } }
-    )
+    // Photo — second request to resolve the resource name into a CDN URL
+    let photoUrl: string | null = null
+    const photoName: string | undefined = googlePlace.photos?.[0]?.name
+    if (photoName) {
+      const mediaRes = await fetch(
+        `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=600&skipHttpRedirect=true`,
+        { headers: { 'X-Goog-Api-Key': apiKey } }
+      )
+      if (mediaRes.ok) {
+        const mediaData = await mediaRes.json()
+        if (typeof mediaData.photoUri === 'string') photoUrl = mediaData.photoUri
+      }
+    }
 
-    if (!mediaRes.ok) return null
+    // Reviews — normalise and strip surnames for privacy
+    const rawReviews: GoogleReview[] = googlePlace.reviews ?? []
+    const reviews: PlaceReview[] = rawReviews.slice(0, 3).map((r) => ({
+      authorName: formatAuthorName(r.authorAttribution?.displayName ?? 'Anonymous'),
+      rating: r.rating ?? 0,
+      text: r.text?.text ?? r.originalText?.text ?? '',
+      relativePublishTimeDescription: r.relativePublishTimeDescription ?? '',
+    }))
 
-    const mediaData = await mediaRes.json()
-    return typeof mediaData.photoUri === 'string' ? mediaData.photoUri : null
+    return {
+      photoUrl,
+      rating: typeof googlePlace.rating === 'number' ? googlePlace.rating : null,
+      userRatingCount: typeof googlePlace.userRatingCount === 'number' ? googlePlace.userRatingCount : null,
+      reviews,
+    }
   } catch {
-    return null
+    return empty
   }
 }
 
@@ -109,15 +161,25 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
     const raw = content.text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '')
     const parsed: RecommendationsResponse = JSON.parse(raw)
 
-    // Fetch one photo per place in parallel; individual failures return null gracefully
-    const photoResults = await Promise.allSettled(
-      parsed.places.map((place) => fetchPlacePhoto(place.name, destination))
+    // Fetch Google Places data for all places in parallel; individual failures degrade gracefully
+    const googleDataResults = await Promise.allSettled(
+      parsed.places.map((place) => fetchPlaceData(place.name, destination))
     )
 
-    const places: Place[] = parsed.places.map((place, i) => ({
-      ...place,
-      photoUrl: photoResults[i].status === 'fulfilled' ? (photoResults[i].value ?? undefined) : undefined,
-    }))
+    const places: Place[] = parsed.places.map((place, i) => {
+      const data: PlaceGoogleData =
+        googleDataResults[i].status === 'fulfilled'
+          ? googleDataResults[i].value
+          : { photoUrl: null, rating: null, userRatingCount: null, reviews: [] }
+
+      return {
+        ...place,
+        photoUrl: data.photoUrl ?? undefined,
+        rating: data.rating ?? undefined,
+        userRatingCount: data.userRatingCount ?? undefined,
+        reviews: data.reviews.length > 0 ? data.reviews : undefined,
+      }
+    })
 
     return Response.json({ places })
   } catch (err) {

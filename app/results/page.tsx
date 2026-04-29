@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { MapPin, Utensils, Bed, type LucideIcon } from 'lucide-react'
-import type { Place } from '../api/recommend/route'
+import { MapPin, Utensils, Bed, Star, type LucideIcon } from 'lucide-react'
+import type { Place, PlaceReview } from '../api/recommend/route'
 
 interface TripMeta {
   destination: string
@@ -43,6 +43,39 @@ function formatDate(iso: string): string {
     month: 'long',
     year: 'numeric',
   })
+}
+
+// Renders filled/empty stars. Pass fill="currentColor" to override lucide's default fill="none".
+function ReviewStars({ rating, size }: { rating: number; size: number }) {
+  return (
+    <div className="flex gap-0.5">
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Star
+          key={s}
+          size={size}
+          strokeWidth={1}
+          fill={s <= Math.round(rating) ? 'currentColor' : 'none'}
+          className={s <= Math.round(rating) ? 'text-amber-400' : 'text-stone-300'}
+        />
+      ))}
+    </div>
+  )
+}
+
+// A single Google review row: name, stars, relative time, clamped text
+function ReviewRow({ review, isFirst }: { review: PlaceReview; isFirst: boolean }) {
+  return (
+    <div className={isFirst ? '' : 'pt-2.5 border-t border-stone-100'}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="text-xs font-medium text-[#3D3830] truncate">{review.authorName}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <ReviewStars rating={review.rating} size={10} />
+          <span className="text-[10px] text-[#9A9087]">{review.relativePublishTimeDescription}</span>
+        </div>
+      </div>
+      <p className="text-xs text-[#6B6B6B] leading-relaxed line-clamp-2">{review.text}</p>
+    </div>
+  )
 }
 
 function LoadingScreen({ destination, messageIndex }: { destination: string; messageIndex: number }) {
@@ -239,6 +272,40 @@ export default function ResultsPage() {
 
                           {/* Description */}
                           <p className="text-[#6B6B6B] text-sm leading-relaxed">{place.description}</p>
+
+                          {/* Rating + Reviews — only rendered when Google Places returned data */}
+                          {(place.rating != null || (place.reviews && place.reviews.length > 0)) && (
+                            <div className="space-y-2.5">
+                              {/* Overall rating line */}
+                              {place.rating != null && (
+                                <div className="flex items-center gap-1.5">
+                                  <Star size={14} strokeWidth={1} fill="currentColor" className="text-amber-400" />
+                                  <span className="text-sm font-semibold text-[#1A1A1A]">
+                                    {place.rating.toFixed(1)}
+                                  </span>
+                                  {place.userRatingCount != null && (
+                                    <span className="text-xs text-[#9A9087]">
+                                      ({place.userRatingCount.toLocaleString()} reviews)
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Individual reviews in a muted inset block */}
+                              {place.reviews && place.reviews.length > 0 && (
+                                <div className="bg-stone-50 rounded-xl p-3.5 space-y-2.5">
+                                  <p className="text-[10px] font-semibold text-[#9A9087] uppercase tracking-wider">
+                                    Reviews from Google
+                                  </p>
+                                  <div>
+                                    {place.reviews.map((review, ri) => (
+                                      <ReviewRow key={ri} review={review} isFirst={ri === 0} />
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                           {/* Why this made the cut */}
                           <div className="pt-2 border-t border-stone-100">
