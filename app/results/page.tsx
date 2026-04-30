@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { MapPin, Utensils, Bed, Star, Cloud, Train, Car, Footprints, type LucideIcon } from 'lucide-react'
-import type { Place, PlaceReview } from '../api/recommend/route'
+import { MapPin, Utensils, Bed, Star, Cloud, Train, Car, Footprints, Layers, Calendar, AlertCircle, Clock, type LucideIcon } from 'lucide-react'
+import type { Place, PlaceReview, SmartNote } from '../api/recommend/route'
 import { saveTrip, getTrip, type SavedTrip } from '../lib/trips'
 import SherpaNav from '../components/SherpaNav'
 
@@ -13,6 +13,7 @@ interface TripMeta {
   startDate: string
   endDate: string
   weatherSummary?: string
+  smartNotes?: SmartNote[]
 }
 
 interface PendingTrip extends TripMeta {
@@ -32,6 +33,13 @@ const SECTIONS: { category: Place['category']; heading: string }[] = [
   { category: 'food', heading: 'Where to eat' },
   { category: 'stay', heading: 'Where to stay' },
 ]
+
+const SMART_NOTE_ICON: Record<string, LucideIcon> = {
+  cluster: Layers,
+  day_trip: Calendar,
+  warning: AlertCircle,
+  timing: Clock,
+}
 
 const CATEGORY_BADGE: Record<Place['category'], { label: string; className: string; Icon: LucideIcon }> = {
   sight: { label: 'Sight', className: 'bg-emerald-100 text-emerald-700', Icon: MapPin },
@@ -137,6 +145,7 @@ export default function ResultsPage() {
         startDate: saved.startDate,
         endDate: saved.endDate,
         weatherSummary: saved.weatherSummary,
+        smartNotes: saved.smartNotes,
       })
       setChecked(true)
       return
@@ -179,6 +188,7 @@ export default function ResultsPage() {
           startDate: pending.startDate,
           endDate: pending.endDate,
           weatherSummary: data.weatherSummary,
+          smartNotes: data.smartNotes,
         }
         sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
         sessionStorage.setItem('sherpa_trip', JSON.stringify(tripMeta))
@@ -194,6 +204,7 @@ export default function ResultsPage() {
           styleTags: pending.travelStyles,
           pace: pending.pace,
           weatherSummary: data.weatherSummary,
+          smartNotes: data.smartNotes,
           places: data.places,
           savedAt: now,
         }
@@ -291,6 +302,26 @@ export default function ResultsPage() {
                 Weather note
               </p>
               <p className="text-sm text-[#3D3830] leading-relaxed">{trip.weatherSummary}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Smart notes — cross-cutting observations from Sherpa */}
+        {trip.smartNotes && trip.smartNotes.length > 0 && (
+          <div className="bg-stone-50 border border-stone-200 rounded-xl px-4 py-4 space-y-3">
+            <p className="text-[10px] font-semibold text-[#9A9087] uppercase tracking-widest">
+              Sherpa says
+            </p>
+            <div className="space-y-2.5">
+              {trip.smartNotes.map((note, i) => {
+                const Icon = SMART_NOTE_ICON[note.type] ?? MapPin
+                return (
+                  <div key={i} className="flex items-start gap-2.5">
+                    <Icon size={14} strokeWidth={1.75} className="text-[#B07242] mt-0.5 shrink-0" />
+                    <p className="text-sm text-[#3D3830] leading-relaxed">{note.text}</p>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

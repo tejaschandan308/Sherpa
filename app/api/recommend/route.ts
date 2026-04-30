@@ -30,9 +30,15 @@ export interface Place {
   transitLabel?: 'Walkable' | 'Transit accessible' | 'Best by taxi'
 }
 
+export interface SmartNote {
+  type: string
+  text: string
+}
+
 export interface RecommendationsResponse {
   places: Place[]
   weatherSummary?: string
+  smartNotes?: SmartNote[]
 }
 
 // --- Internal types ---
@@ -369,6 +375,14 @@ export async function POST(request: Request) {
 
 When weather data is provided, weave it into your "whyItMadeTheCut" reasoning only where it genuinely changes the recommendation — skip beach activities on rainy days, highlight perfect seasonal timing, flag indoor alternatives in bad weather. Don't mention weather on every place; only where it actually matters.
 
+After building the place list, look across ALL the recommended places and write 2–4 cross-cutting smartNotes. Each note must be SPECIFIC and actionable, referencing actual place names from your recommendations. Use these note types:
+- "cluster": places in the same neighbourhood that are worth visiting together
+- "day_trip": a place that warrants a dedicated full day away from the city centre
+- "warning": a genuine gotcha — two places that are far apart and not worth combining, a known closure day, a crowd issue
+- "timing": a specific time of day when a place is meaningfully better (sunrise, sunset, pre-noon, etc.)
+
+Rules for smartNotes: only write a note if it's genuinely useful — better to return 2 sharp notes than 4 generic ones. Don't force notes that aren't there. Write like a knowledgeable friend texting advice: casual, direct, opinionated. No guidebook language.
+
 Your output must be ONLY valid JSON, with no explanation, no markdown, and no code fences — just the raw JSON object.`,
       messages: [
         {
@@ -382,6 +396,9 @@ ${weatherSection}
 Return exactly 8 recommended places as JSON in this exact format:
 {
   "weatherSummary": "string — 1-2 sentences on what the conditions mean for this trip (omit this field entirely if no weather data was provided)",
+  "smartNotes": [
+    { "type": "cluster" | "day_trip" | "warning" | "timing", "text": "string — casual, specific, actionable. Reference actual place names." }
+  ],
   "places": [
     {
       "name": "string",
@@ -441,7 +458,7 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
       }
     })
 
-    return Response.json({ places, weatherSummary: parsed.weatherSummary })
+    return Response.json({ places, weatherSummary: parsed.weatherSummary, smartNotes: parsed.smartNotes ?? [] })
   } catch (err) {
     console.error('Recommend API error:', err)
     const message = err instanceof Error ? err.message : 'Unknown error'

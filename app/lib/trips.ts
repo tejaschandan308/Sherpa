@@ -1,4 +1,6 @@
-import type { Place } from '../api/recommend/route'
+import type { Place, SmartNote } from '../api/recommend/route'
+
+export type { SmartNote }
 
 export interface SavedTrip {
   id: number
@@ -8,6 +10,7 @@ export interface SavedTrip {
   styleTags: string[]
   pace: string
   weatherSummary?: string
+  smartNotes?: SmartNote[]
   places: Place[]
   savedAt: number
 }
