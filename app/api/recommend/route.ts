@@ -39,6 +39,10 @@ export interface RecommendationsResponse {
   places: Place[]
   weatherSummary?: string
   smartNotes?: SmartNote[]
+  destinationAdverb?: string
+  tripFrame?: string
+  temperatureRange?: string
+  weatherKicker?: string
 }
 
 // --- Internal types ---
@@ -283,6 +287,66 @@ async function fetchPlaceData(placeName: string, destination: string): Promise<P
   }
 }
 
+// Fetches a hero photo for the destination by trying multiple search queries in order.
+// Logs each step so failures are visible in server logs. Returns null if all queries fail.
+async function fetchDestinationHeroPhotoUrl(destination: string): Promise<string | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) return null
+
+  // Broadest-first: city gives the richest photo pool; landmark/tourism are narrower fallbacks
+  const queries = [`${destination} city`, `${destination} landmark`, destination]
+
+  for (const query of queries) {
+    try {
+      const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'places.photos,places.displayName',
+        },
+        body: JSON.stringify({ textQuery: query }),
+      })
+
+      if (!searchRes.ok) {
+        console.warn(`[hero] searchText HTTP ${searchRes.status} for query: "${query}"`)
+        continue
+      }
+
+      const searchData = await searchRes.json()
+      const photoName: string | undefined = searchData.places?.[0]?.photos?.[0]?.name
+
+      if (!photoName) {
+        console.log(`[hero] no photos returned for query: "${query}"`)
+        continue
+      }
+
+      const mediaRes = await fetch(
+        `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=1600&skipHttpRedirect=true`,
+        { headers: { 'X-Goog-Api-Key': apiKey } }
+      )
+
+      if (!mediaRes.ok) {
+        console.warn(`[hero] media fetch HTTP ${mediaRes.status} for query: "${query}"`)
+        continue
+      }
+
+      const mediaData = await mediaRes.json()
+      if (typeof mediaData.photoUri === 'string') {
+        console.log(`[hero] success with query: "${query}"`)
+        return mediaData.photoUri
+      }
+
+      console.warn(`[hero] no photoUri in media response for query: "${query}"`)
+    } catch (err) {
+      console.error(`[hero] error for query "${query}":`, err)
+    }
+  }
+
+  console.warn(`[hero] all queries exhausted for destination: "${destination}"`)
+  return null
+}
+
 // Batches all place locations into a single Distance Matrix call and returns transit info per place.
 // Uses transit mode; falls back to estimated walk time for places under 1.5 km.
 async function fetchTransitData(
@@ -375,13 +439,35 @@ export async function POST(request: Request) {
 
 When weather data is provided, weave it into your "whyItMadeTheCut" reasoning only where it genuinely changes the recommendation — skip beach activities on rainy days, highlight perfect seasonal timing, flag indoor alternatives in bad weather. Don't mention weather on every place; only where it actually matters.
 
-After building the place list, look across ALL the recommended places and write 2–4 cross-cutting smartNotes. Each note must be SPECIFIC and actionable, referencing actual place names from your recommendations. Use these note types:
-- "cluster": places in the same neighbourhood that are worth visiting together
-- "day_trip": a place that warrants a dedicated full day away from the city centre
-- "warning": a genuine gotcha — two places that are far apart and not worth combining, a known closure day, a crowd issue
-- "timing": a specific time of day when a place is meaningfully better (sunrise, sunset, pre-noon, etc.)
+After building the place list, write 2–4 smartNotes. Use these types:
+- "cluster": places close enough to visit in one go
+- "day_trip": a place warranting a dedicated full day
+- "warning": a closure day, crowd issue, or combination that wastes time
+- "timing": a specific time when a place is meaningfully better
 
-Rules for smartNotes: only write a note if it's genuinely useful — better to return 2 sharp notes than 4 generic ones. Don't force notes that aren't there. Write like a knowledgeable friend texting advice: casual, direct, opinionated. No guidebook language.
+STRICT RULES for each note's "text" field:
+- 15 words OR FEWER. Count them. No exceptions.
+- One sentence only. No semicolons joining multiple clauses.
+- Direct statement. No "you can", "you'll find", "make sure to", "remember to".
+- Must reference an actual place name from the recommendations.
+
+CORRECT examples (count the words — all under 15):
+- "Gruut, Vrijdagmarkt, and Publiek — all within a 10-minute walk." (11 words)
+- "Graslei at 8pm in May. After the boats dock." (9 words)
+- "SMAK is closed Mondays. Don't plan a rainy-day escape there." (10 words)
+- "Dok Noord deserves a full afternoon, not a detour." (9 words)
+
+WRONG examples (too long — do not produce notes like these):
+- "Gruut Brewery, Vrijdagmarkt, and Publiek restaurant are all within a 10-minute walk of each other in the old centre. Stack them into one evening: early dinner at Publiek, then a tasting flight at Gruut."
+- "Graslei is genuinely stunning at golden hour — show up around 8pm in early May when the light hits the guild houses perfectly."
+
+Quality over quantity. 2 sharp notes beats 4 mediocre ones. If you cannot make a useful note in 15 words, omit it.
+
+Also generate these editorial fields:
+- destinationAdverb: A single word capturing how this traveller should move through this destination. Ground it in their style tags and the destination's character. One word only, no punctuation, no exclamation marks. Examples: Lisbon + foodie/nature → "slowly"; Tokyo + night owl → "electric"; Spiti + nature seeker → "quietly"; Kyoto + slow travel → "deliberately".
+- tripFrame: One confident magazine-style sentence, present tense, 5–8 words, ends with a period. No filler adjectives. Examples: "An eight-day walking week."; "Five nights, two neighborhoods."; "A slow loop through Honshu."
+- temperatureRange: A clean temperature string using an em-dash (—), not a hyphen. Example: "18° — 24°". Use the trip's actual weather context when provided; otherwise use your seasonal knowledge for the destination and month.
+- weatherKicker: A punchy 6-10 word phrase summarising the weather conditions for this trip. One clause, no period, all lowercase except temperatures or proper nouns. Different from weatherSummary — this is a kicker, not prose. Examples: "warm afternoons, cool evenings, three rainy days"; "hot and dry, classic Mediterranean May"; "crisp dry days, sub-zero nights at altitude"; "mostly sunny with one unsettled afternoon". Omit this field entirely if no weather data was provided.
 
 Your output must be ONLY valid JSON, with no explanation, no markdown, and no code fences — just the raw JSON object.`,
       messages: [
@@ -395,6 +481,10 @@ Traveller profile:
 ${weatherSection}
 Return exactly 8 recommended places as JSON in this exact format:
 {
+  "destinationAdverb": "string — single word, no punctuation",
+  "tripFrame": "string — 5-8 word magazine sentence, present tense, ends with period",
+  "temperatureRange": "string — e.g. \"18° — 24°\" using em-dash",
+  "weatherKicker": "string — 6-10 word punchy phrase, no period, all lowercase (omit entirely if no weather data was provided)",
   "weatherSummary": "string — 1-2 sentences on what the conditions mean for this trip (omit this field entirely if no weather data was provided)",
   "smartNotes": [
     { "type": "cluster" | "day_trip" | "warning" | "timing", "text": "string — casual, specific, actionable. Reference actual place names." }
@@ -422,10 +512,26 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
     const raw = content.text.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '')
     const parsed: RecommendationsResponse = JSON.parse(raw)
 
-    // Fetch Google Places data for all places in parallel; individual failures degrade gracefully
-    const googleDataResults = await Promise.allSettled(
-      parsed.places.map((place) => fetchPlaceData(place.name, destination))
-    )
+    // Fetch hero photo + all place data in parallel; individual failures degrade gracefully
+    const allFetchResults = await Promise.allSettled([
+      fetchDestinationHeroPhotoUrl(destination),
+      ...parsed.places.map((place) => fetchPlaceData(place.name, destination)),
+    ])
+    const heroPhotoResult = allFetchResults[0] as PromiseSettledResult<string | null>
+    const googleDataResults = allFetchResults.slice(1) as PromiseSettledResult<PlaceGoogleData>[]
+
+    // Hero photo: destination search result → first place's photo → undefined (no image)
+    const heroPhotoFromSearch =
+      heroPhotoResult.status === 'fulfilled' ? heroPhotoResult.value : null
+    if (heroPhotoResult.status === 'rejected') {
+      console.error('[hero] destination fetch rejected:', heroPhotoResult.reason)
+    }
+    const heroPhotoFallback =
+      googleDataResults[0]?.status === 'fulfilled' ? googleDataResults[0].value.photoUrl : null
+    if (!heroPhotoFromSearch) {
+      console.log(`[hero] using fallback: ${heroPhotoFallback ? 'first place photo' : 'none — no image will show'}`)
+    }
+    const destinationHeroPhotoUrl = heroPhotoFromSearch ?? heroPhotoFallback ?? undefined
 
     // Extract the per-place coordinates we just fetched, then run a single batched Distance Matrix call
     const placeLocations = googleDataResults.map((r) =>
@@ -458,7 +564,16 @@ Mix the categories: roughly 4 sights, 2 food, 2 stays. Be opinionated — name w
       }
     })
 
-    return Response.json({ places, weatherSummary: parsed.weatherSummary, smartNotes: parsed.smartNotes ?? [] })
+    return Response.json({
+      places,
+      weatherSummary: parsed.weatherSummary,
+      weatherKicker: parsed.weatherKicker,
+      smartNotes: parsed.smartNotes ?? [],
+      destinationAdverb: parsed.destinationAdverb,
+      tripFrame: parsed.tripFrame,
+      temperatureRange: parsed.temperatureRange,
+      destinationHeroPhotoUrl,
+    })
   } catch (err) {
     console.error('Recommend API error:', err)
     const message = err instanceof Error ? err.message : 'Unknown error'

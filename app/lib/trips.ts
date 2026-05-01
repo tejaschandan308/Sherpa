@@ -13,6 +13,11 @@ export interface SavedTrip {
   smartNotes?: SmartNote[]
   places: Place[]
   savedAt: number
+  destinationAdverb?: string
+  tripFrame?: string
+  temperatureRange?: string
+  weatherKicker?: string
+  destinationHeroPhotoUrl?: string
 }
 
 const STORAGE_KEY = 'sherpa_trips'

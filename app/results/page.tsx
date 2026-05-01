@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { MapPin, Utensils, Bed, Star, Cloud, Train, Car, Footprints, Layers, Calendar, AlertCircle, Clock, type LucideIcon } from 'lucide-react'
-import type { Place, PlaceReview, SmartNote } from '../api/recommend/route'
+import { Star } from 'lucide-react'
+import type { Place, SmartNote } from '../api/recommend/route'
 import { saveTrip, getTrip, type SavedTrip } from '../lib/trips'
 import SherpaNav from '../components/SherpaNav'
 
@@ -13,7 +13,13 @@ interface TripMeta {
   startDate: string
   endDate: string
   weatherSummary?: string
+  weatherKicker?: string
   smartNotes?: SmartNote[]
+  destinationAdverb?: string
+  tripFrame?: string
+  temperatureRange?: string
+  destinationHeroPhotoUrl?: string
+  curatedAt?: number
 }
 
 interface PendingTrip extends TripMeta {
@@ -28,64 +34,48 @@ const LOADING_MESSAGES = [
   'Curating your shortlist...',
 ]
 
-const SECTIONS: { category: Place['category']; heading: string }[] = [
-  { category: 'sight', heading: 'Things to do' },
-  { category: 'food', heading: 'Where to eat' },
-  { category: 'stay', heading: 'Where to stay' },
+const SECTIONS: { category: Place['category']; label: string }[] = [
+  { category: 'sight', label: 'Do.' },
+  { category: 'food', label: 'Eat.' },
+  { category: 'stay', label: 'Stay.' },
 ]
 
-const SMART_NOTE_ICON: Record<string, LucideIcon> = {
-  cluster: Layers,
-  day_trip: Calendar,
-  warning: AlertCircle,
-  timing: Clock,
+const SMART_NOTE_LABEL: Record<string, string> = {
+  cluster: 'CLUSTER',
+  day_trip: 'DAY TRIP',
+  warning: 'HEADS UP',
+  timing: 'TIMING',
 }
 
-const CATEGORY_BADGE: Record<Place['category'], { label: string; className: string; Icon: LucideIcon }> = {
-  sight: { label: 'Sight', className: 'bg-emerald-100 text-emerald-700', Icon: MapPin },
-  food: { label: 'Food & Drink', className: 'bg-amber-100 text-amber-700', Icon: Utensils },
-  stay: { label: 'Stay', className: 'bg-indigo-100 text-indigo-700', Icon: Bed },
+// Formats a timestamp as "DD MMM YYYY" for the editorial header strip.
+function formatCuratedDate(ts?: number): string {
+  const date = ts ? new Date(ts) : new Date()
+  const day = date.getDate().toString().padStart(2, '0')
+  const month = date.toLocaleString('en-GB', { month: 'short' }).toUpperCase()
+  return `${day} ${month} ${date.getFullYear()}`
 }
 
-function formatDate(iso: string): string {
-  const [year, month, day] = iso.split('-').map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+// Returns the kicker phrase for the weather line.
+// Prefers weatherKicker from the API; falls back to the first sentence of weatherSummary
+// so that saved trips generated before this field existed still render something.
+function getKickerPhrase(trip: TripMeta): string | null {
+  if (trip.weatherKicker) return trip.weatherKicker
+  if (trip.weatherSummary) {
+    const first = trip.weatherSummary.split(/[.!?]/)[0]?.trim()
+    return first && first.length > 0 ? first : null
+  }
+  return null
 }
 
-// Renders filled/empty stars. Pass fill="currentColor" to override lucide's default fill="none".
-function ReviewStars({ rating, size }: { rating: number; size: number }) {
+// Editorial pull-quote — italic Georgia, no author name, clamped to 2 lines
+function PullQuote({ text }: { text: string }) {
   return (
-    <div className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((s) => (
-        <Star
-          key={s}
-          size={size}
-          strokeWidth={1}
-          fill={s <= Math.round(rating) ? 'currentColor' : 'none'}
-          className={s <= Math.round(rating) ? 'text-amber-400' : 'text-stone-300'}
-        />
-      ))}
-    </div>
-  )
-}
-
-// A single Google review row: name, stars, relative time, clamped text
-function ReviewRow({ review, isFirst }: { review: PlaceReview; isFirst: boolean }) {
-  return (
-    <div className={isFirst ? '' : 'pt-2.5 border-t border-stone-100'}>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="text-xs font-medium text-[#3D3830] truncate">{review.authorName}</span>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <ReviewStars rating={review.rating} size={10} />
-          <span className="text-[10px] text-[#9A9087]">{review.relativePublishTimeDescription}</span>
-        </div>
-      </div>
-      <p className="text-xs text-[#6B6B6B] leading-relaxed line-clamp-2">{review.text}</p>
-    </div>
+    <p
+      className="text-[#6B6B6B] text-sm leading-relaxed line-clamp-2 pl-3 border-l border-stone-300"
+      style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic' }}
+    >
+      &ldquo;{text}&rdquo;
+    </p>
   )
 }
 
@@ -145,7 +135,13 @@ export default function ResultsPage() {
         startDate: saved.startDate,
         endDate: saved.endDate,
         weatherSummary: saved.weatherSummary,
+        weatherKicker: saved.weatherKicker,
         smartNotes: saved.smartNotes,
+        destinationAdverb: saved.destinationAdverb,
+        tripFrame: saved.tripFrame,
+        temperatureRange: saved.temperatureRange,
+        destinationHeroPhotoUrl: saved.destinationHeroPhotoUrl,
+        curatedAt: saved.savedAt,
       })
       setChecked(true)
       return
@@ -183,19 +179,25 @@ export default function ResultsPage() {
         return res.json()
       })
       .then((data) => {
+        const now = Date.now()
         const tripMeta: TripMeta = {
           destination: pending.destination,
           startDate: pending.startDate,
           endDate: pending.endDate,
           weatherSummary: data.weatherSummary,
+          weatherKicker: data.weatherKicker,
           smartNotes: data.smartNotes,
+          destinationAdverb: data.destinationAdverb,
+          tripFrame: data.tripFrame,
+          temperatureRange: data.temperatureRange,
+          destinationHeroPhotoUrl: data.destinationHeroPhotoUrl,
+          curatedAt: now,
         }
         sessionStorage.setItem('sherpa_recommendations', JSON.stringify(data.places))
         sessionStorage.setItem('sherpa_trip', JSON.stringify(tripMeta))
         sessionStorage.removeItem('sherpa_pending_trip')
 
         // Auto-save to localStorage and update URL to reflect the saved trip ID
-        const now = Date.now()
         const newTrip: SavedTrip = {
           id: now,
           destination: pending.destination,
@@ -204,9 +206,14 @@ export default function ResultsPage() {
           styleTags: pending.travelStyles,
           pace: pending.pace,
           weatherSummary: data.weatherSummary,
+          weatherKicker: data.weatherKicker,
           smartNotes: data.smartNotes,
           places: data.places,
           savedAt: now,
+          destinationAdverb: data.destinationAdverb,
+          tripFrame: data.tripFrame,
+          temperatureRange: data.temperatureRange,
+          destinationHeroPhotoUrl: data.destinationHeroPhotoUrl,
         }
         saveTrip(newTrip)
         window.history.replaceState(null, '', `/results?tripId=${now}`)
@@ -278,187 +285,215 @@ export default function ResultsPage() {
 
   return (
     <div className="min-h-screen bg-[#FAFAF7] animate-fade-in-up">
-      <SherpaNav />
-      <div className="px-4 pb-16">
-      <div className="max-w-4xl mx-auto space-y-12">
 
-        {/* Trip header */}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-[#9A9087] tracking-widest uppercase">
-            Your Sherpa shortlist
-          </p>
-          <h1 className="text-4xl font-bold tracking-tight text-[#1A1A1A]">{trip.destination}</h1>
-          <p className="text-[#6B6B6B] text-sm">
-            {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
-          </p>
+      {/* Editorial header strip */}
+      <div className="px-6 py-3 flex items-center justify-between border-b border-stone-200">
+        <span
+          className="text-sm text-[#1A1A1A] italic"
+          style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+        >
+          Sherpa
+        </span>
+        <span className="text-[10px] font-medium text-[#9A9087] uppercase tracking-[0.18em]">
+          Curated {formatCuratedDate(trip.curatedAt)}
+        </span>
+      </div>
+
+      {/* Full-bleed hero */}
+      <div className="relative w-full" style={{ height: '45vh', minHeight: '280px' }}>
+        {trip.destinationHeroPhotoUrl ? (
+          <Image
+            src={trip.destinationHeroPhotoUrl}
+            alt={trip.destination}
+            fill
+            className="object-cover"
+            sizes="100vw"
+            priority
+          />
+        ) : (
+          <div className="absolute inset-0 bg-stone-300" />
+        )}
+        {/* Gradient: transparent top → dark bottom 50% */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent" />
+
+        {/* Headline + subtitle */}
+        <div className="absolute inset-0 flex flex-col justify-end px-6 pb-6 md:px-10 md:pb-8">
+          <h1
+            className="text-white text-4xl md:text-5xl leading-tight italic mb-2"
+            style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+          >
+            {trip.destination}
+            {trip.destinationAdverb ? `, ${trip.destinationAdverb}.` : '.'}
+          </h1>
+          {trip.tripFrame && (
+            <p className="text-white/80 text-sm font-light tracking-wide">
+              {trip.tripFrame}
+            </p>
+          )}
         </div>
 
-        {/* Weather note — only shown when Claude returned a weatherSummary */}
-        {trip.weatherSummary && (
-          <div className="flex items-start gap-3 bg-sky-50/70 border border-sky-100 rounded-xl px-4 py-3">
-            <Cloud size={15} className="text-sky-400 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-[10px] font-semibold text-sky-500 uppercase tracking-wider mb-0.5">
-                Weather note
-              </p>
-              <p className="text-sm text-[#3D3830] leading-relaxed">{trip.weatherSummary}</p>
-            </div>
-          </div>
-        )}
+        {/* Bottom-right candidacy label */}
+        <div className="absolute bottom-4 right-5 md:bottom-6 md:right-8">
+          <span
+            className="text-white/50 text-[9px] font-medium uppercase"
+            style={{ letterSpacing: '0.18em' }}
+          >
+            A shortlist of eight, from 1,000+ candidates.
+          </span>
+        </div>
+      </div>
 
-        {/* Smart notes — cross-cutting observations from Sherpa */}
-        {trip.smartNotes && trip.smartNotes.length > 0 && (
-          <div className="bg-stone-50 border border-stone-200 rounded-xl px-4 py-4 space-y-3">
-            <p className="text-[10px] font-semibold text-[#9A9087] uppercase tracking-widest">
-              Sherpa says
-            </p>
-            <div className="space-y-2.5">
-              {trip.smartNotes.map((note, i) => {
-                const Icon = SMART_NOTE_ICON[note.type] ?? MapPin
-                return (
-                  <div key={i} className="flex items-start gap-2.5">
-                    <Icon size={14} strokeWidth={1.75} className="text-[#B07242] mt-0.5 shrink-0" />
-                    <p className="text-sm text-[#3D3830] leading-relaxed">{note.text}</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+      <div className="px-4 pb-20">
+      <div className="max-w-4xl mx-auto">
 
-        {/* Recommendations grouped by category */}
-        <div className="space-y-10">
-          {SECTIONS.map(({ category, heading }) => {
+        {/* Sections — Do. / Eat. / Stay. */}
+        {(() => {
+          let runningTotal = 0
+          return SECTIONS.map(({ category, label }) => {
             const sectionPlaces = places.filter((p) => p.category === category)
             if (sectionPlaces.length === 0) return null
 
+            const startCard = runningTotal + 1
+            const endCard = runningTotal + sectionPlaces.length
+            runningTotal += sectionPlaces.length
+
             return (
               <section key={category}>
-                <div className="flex items-baseline gap-2 mb-4">
-                  <h2 className="text-lg font-bold text-[#1A1A1A]">{heading}</h2>
-                  <span className="text-sm text-[#9A9087]">({sectionPlaces.length})</span>
+
+                {/* Editorial section header */}
+                <div className="pt-16 md:pt-20">
+                  <div className="flex items-end justify-between pb-4">
+                    <h2
+                      className="text-[#1A1A1A] italic leading-none"
+                      style={{
+                        fontFamily: 'Georgia, "Times New Roman", serif',
+                        fontSize: 'clamp(3.5rem, 8vw, 4.75rem)',
+                        fontWeight: 300,
+                      }}
+                    >
+                      {label}
+                    </h2>
+                    <span
+                      className="text-[10px] font-medium text-[#999] uppercase mb-1"
+                      style={{ letterSpacing: '0.15em' }}
+                    >
+                      {String(startCard).padStart(2, '0')} / {String(endCard).padStart(2, '0')}
+                    </span>
+                  </div>
+                  <div className="border-b border-stone-200" />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {sectionPlaces.map((place, i) => {
-                    const { label, className, Icon } = CATEGORY_BADGE[place.category]
-                    return (
-                      <div
-                        key={i}
-                        className="flex flex-col h-full bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 cursor-default"
-                      >
-                        {/* Photo — full-width at top, or gray placeholder if missing */}
-                        {place.photoUrl ? (
-                          <div className="relative h-48 w-full">
+                {/* Cards */}
+                <div>
+                  {sectionPlaces.map((place, i) => (
+                    <div key={i} className={i > 0 ? 'mt-14 md:mt-16' : 'mt-8'}>
+
+                      {/* Horizontal card: photo left, content right */}
+                      <div className="flex flex-col md:flex-row">
+
+                        {/* Photo */}
+                        <div className="relative h-64 md:h-auto md:w-[45%] flex-shrink-0 rounded-sm overflow-hidden">
+                          {place.photoUrl ? (
                             <Image
                               src={place.photoUrl}
                               alt={place.name}
                               fill
                               className="object-cover"
-                              sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 448px"
+                              sizes="(max-width: 768px) 100vw, 45vw"
                             />
-                          </div>
-                        ) : (
-                          <div className="h-48 w-full bg-stone-100" />
-                        )}
+                          ) : (
+                            <div className="absolute inset-0 bg-stone-200" />
+                          )}
+                        </div>
 
-                        {/* Card body */}
-                        <div className="flex-1 p-6 space-y-3">
-                          {/* Name + category badge */}
-                          <div className="flex items-start justify-between gap-3">
-                            <h3 className="text-lg font-bold text-[#1A1A1A] leading-snug">{place.name}</h3>
-                            <span className={`shrink-0 flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${className}`}>
-                              <Icon size={11} strokeWidth={2.5} />
-                              {label}
-                            </span>
+                        {/* Content */}
+                        <div className="flex-1 flex flex-col pt-6 md:px-10 md:pt-6 md:pb-6">
+
+                          {/* Name + rating */}
+                          <div className="flex items-start justify-between gap-4 mb-4">
+                            <h3
+                              className="text-[#1A1A1A] italic leading-tight"
+                              style={{
+                                fontFamily: 'Georgia, "Times New Roman", serif',
+                                fontSize: '1.75rem',
+                                fontWeight: 400,
+                              }}
+                            >
+                              {place.name}
+                            </h3>
+                            {place.rating != null && (
+                              <div className="flex items-center gap-1.5 shrink-0 mt-1.5">
+                                <Star size={12} strokeWidth={1} fill="currentColor" className="text-amber-400" />
+                                <span className="text-sm text-[#1A1A1A]">
+                                  {place.rating.toFixed(1)}
+                                </span>
+                                {place.userRatingCount != null && (
+                                  <span className="text-xs text-[#999]">
+                                    ({place.userRatingCount.toLocaleString()})
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           {/* Description */}
-                          <p className="text-[#6B6B6B] text-sm leading-relaxed">{place.description}</p>
+                          <p className="text-[#666] text-sm leading-relaxed mb-5">
+                            {place.description}
+                          </p>
 
-                          {/* Rating + Reviews — only rendered when Google Places returned data */}
-                          {(place.rating != null || (place.reviews && place.reviews.length > 0)) && (
-                            <div className="space-y-2.5">
-                              {/* Overall rating line */}
-                              {place.rating != null && (
-                                <div className="flex items-center gap-1.5">
-                                  <Star size={14} strokeWidth={1} fill="currentColor" className="text-amber-400" />
-                                  <span className="text-sm font-semibold text-[#1A1A1A]">
-                                    {place.rating.toFixed(1)}
-                                  </span>
-                                  {place.userRatingCount != null && (
-                                    <span className="text-xs text-[#9A9087]">
-                                      ({place.userRatingCount.toLocaleString()} reviews)
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Individual reviews in a muted inset block */}
-                              {place.reviews && place.reviews.length > 0 && (
-                                <div className="bg-stone-50 rounded-xl p-3.5 space-y-2.5">
-                                  <p className="text-[10px] font-semibold text-[#9A9087] uppercase tracking-wider">
-                                    Reviews from Google
-                                  </p>
-                                  <div>
-                                    {place.reviews.map((review, ri) => (
-                                      <ReviewRow key={ri} review={review} isFirst={ri === 0} />
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                          {/* Pull-quotes — reviewer name dropped for editorial feel */}
+                          {place.reviews && place.reviews.length > 0 && (
+                            <div className="space-y-2.5 mb-5">
+                              {place.reviews
+                                .filter((r) => r.text.trim().length > 0)
+                                .map((review, ri) => (
+                                  <PullQuote key={ri} text={review.text} />
+                                ))}
                             </div>
                           )}
 
-                          {/* Distance + transit info */}
+                          {/* Distance / transit metadata */}
                           {place.distanceText && (
-                            <div className="flex items-center gap-2 text-xs text-[#9A9087] flex-wrap">
-                              <span className="flex items-center gap-1">
-                                <MapPin size={12} strokeWidth={1.5} />
-                                {place.distanceText}
-                              </span>
-                              {place.durationText && (
-                                <>
-                                  <span aria-hidden>·</span>
-                                  <span className="flex items-center gap-1">
-                                    {place.transitLabel === 'Walkable' ? (
-                                      <Footprints size={12} strokeWidth={1.5} />
-                                    ) : place.transitLabel === 'Transit accessible' ? (
-                                      <Train size={12} strokeWidth={1.5} />
-                                    ) : (
-                                      <Car size={12} strokeWidth={1.5} />
-                                    )}
-                                    {place.durationText}
-                                  </span>
-                                </>
-                              )}
-                              {place.transitLabel && (
-                                <span className="bg-stone-100 text-[#9A9087] px-2 py-0.5 rounded-full text-[10px] font-medium">
-                                  {place.transitLabel}
-                                </span>
-                              )}
-                            </div>
+                            <p
+                              className="text-[10px] font-medium text-[#999] uppercase mt-auto"
+                              style={{ letterSpacing: '0.12em' }}
+                            >
+                              {place.distanceText} from centre
+                              {place.durationText ? `  /  ${place.durationText}` : ''}
+                              {!place.durationText && place.transitLabel ? `  /  ${place.transitLabel}` : ''}
+                            </p>
                           )}
 
-                          {/* Why this made the cut */}
-                          <div className="pt-2 border-t border-stone-100">
-                            <p className="text-xs font-semibold text-[#9A9087] uppercase tracking-wide mb-1">
-                              Why this made the cut
-                            </p>
-                            <p className="text-[#3D3830] text-sm leading-relaxed">{place.whyItMadeTheCut}</p>
-                          </div>
                         </div>
                       </div>
-                    )
-                  })}
+
+                      {/* WHY THIS — full card width */}
+                      <div className="flex flex-col md:flex-row gap-3 md:gap-8 pt-5 pb-5 mt-5 md:mt-0 border-t border-stone-200 border-b border-stone-200">
+                        <span
+                          className="shrink-0 text-[10px] font-medium uppercase text-[#C9683A] pt-0.5"
+                          style={{ letterSpacing: '0.15em', minWidth: '96px' }}
+                        >
+                          Why This
+                        </span>
+                        <p
+                          className="text-sm text-[#3D3830] leading-relaxed italic"
+                          style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+                        >
+                          {place.whyItMadeTheCut}
+                        </p>
+                      </div>
+
+                    </div>
+                  ))}
                 </div>
+
               </section>
             )
-          })}
-        </div>
+          })
+        })()}
 
-        {/* Plan another trip — prominent terracotta button */}
-        <div className="text-center pt-4 pb-8">
+        {/* CTA */}
+        <div className="text-center pt-20 pb-8">
           <button
             onClick={() => router.push('/')}
             className="bg-[#B07242] text-white font-medium px-8 py-3 rounded-lg hover:bg-[#8F5B2D] active:bg-[#7A4A22] transition"
