@@ -5,16 +5,18 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
-import SherpaNav from '../components/SherpaNav'
 import { getAllTrips, deleteTrip, type SavedTrip } from '../lib/trips'
 
-function formatDate(iso: string): string {
+function formatShortDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number)
   return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
     day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    month: 'short',
   })
+}
+
+function formatYear(iso: string): string {
+  return iso.slice(0, 4)
 }
 
 export default function TripsPage() {
@@ -39,101 +41,149 @@ export default function TripsPage() {
 
   return (
     <div className="min-h-screen bg-[#FAFAF7]">
-      <SherpaNav />
 
-      <main className="max-w-2xl mx-auto px-6 py-10">
+      {/* Editorial header strip */}
+      <div className="px-6 py-3 flex items-center justify-between border-b border-stone-200">
+        <Link href="/">
+          <span
+            className="text-sm text-[#1A1A1A] italic"
+            style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+          >
+            Sherpa
+          </span>
+        </Link>
+        <Link
+          href="/"
+          className="text-[10px] font-medium uppercase hover:opacity-70 transition-opacity"
+          style={{ letterSpacing: '0.18em', color: '#C9683A' }}
+        >
+          Plan a trip →
+        </Link>
+      </div>
 
-        {/* Page header */}
-        <div className="space-y-1 mb-10">
-          <p className="text-xs font-semibold text-[#9A9087] tracking-widest uppercase">Saved</p>
-          <h1 className="text-3xl font-bold tracking-tight text-[#1A1A1A]">
-            Your trips
-            {trips.length > 0 && (
-              <span className="ml-2 text-2xl font-normal text-[#9A9087]">({trips.length})</span>
-            )}
+      <main className="max-w-2xl mx-auto px-6">
+
+        {/* Page heading */}
+        <div className="pt-12 pb-10">
+          <p
+            className="text-[9px] font-medium uppercase text-[#B0A89C] mb-3"
+            style={{ letterSpacing: '0.2em' }}
+          >
+            Saved
+          </p>
+          <h1
+            className="text-[#1A1A1A] italic leading-[1.1]"
+            style={{
+              fontFamily: 'Georgia, "Times New Roman", serif',
+              fontWeight: 300,
+              fontSize: 'clamp(3rem, 7vw, 4.5rem)',
+            }}
+          >
+            Your trips.
           </h1>
+          {trips.length > 0 && (
+            <p
+              className="text-[9px] font-medium uppercase text-[#9A9087] mt-4"
+              style={{ letterSpacing: '0.15em' }}
+            >
+              {trips.length} saved
+            </p>
+          )}
         </div>
 
         {/* Empty state */}
         {trips.length === 0 ? (
-          <div className="text-center py-20 space-y-4">
-            <p className="text-[#6B6B6B]">No trips yet. Plan your first trip to get started.</p>
+          <div className="py-20 border-t border-stone-200">
+            <p
+              className="italic text-[1.5rem] text-[#9A9087] mb-6"
+              style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontWeight: 300 }}
+            >
+              No trips yet.
+            </p>
             <Link
               href="/"
-              className="inline-block bg-[#B07242] text-white font-medium px-6 py-2.5 rounded-lg hover:bg-[#8F5B2D] transition text-sm"
+              className="text-[10px] font-medium uppercase hover:opacity-70 transition-opacity"
+              style={{ letterSpacing: '0.18em', color: '#C9683A' }}
             >
-              Plan a trip
+              Plan a trip →
             </Link>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="border-t border-stone-200">
             {trips.map((trip) => {
-              const heroPhoto = trip.places[0]?.photoUrl
+              const photoUrl = trip.destinationHeroPhotoUrl ?? trip.places[0]?.photoUrl
+              const styleLabel = trip.styleTags.map((t) => t.toUpperCase()).join(' · ')
+
               return (
                 <div
                   key={trip.id}
                   onClick={() => router.push(`/results?tripId=${trip.id}`)}
-                  className="relative bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="relative flex gap-5 py-7 border-b border-stone-200 cursor-pointer group"
                 >
-                  {/* Delete button */}
-                  <button
-                    onClick={(e) => handleDelete(e, trip.id)}
-                    aria-label="Delete trip"
-                    className="absolute top-3 right-3 z-10 p-1.5 bg-white/80 backdrop-blur-sm rounded-full text-[#9A9087] hover:text-[#1A1A1A] hover:bg-white transition shadow-sm"
-                  >
-                    <X size={14} strokeWidth={2} />
-                  </button>
-
-                  <div className="flex">
-                    {/* Hero image */}
-                    {heroPhoto ? (
-                      <div className="relative w-36 shrink-0">
-                        <Image
-                          src={heroPhoto}
-                          alt={trip.destination}
-                          fill
-                          className="object-cover"
-                          sizes="144px"
-                        />
-                      </div>
-                    ) : (
-                      <div className="w-36 shrink-0 bg-stone-100" />
+                  {/* Photo */}
+                  <div className="relative w-[28%] shrink-0 aspect-[4/3] rounded-sm overflow-hidden bg-stone-200">
+                    {photoUrl && (
+                      <Image
+                        src={photoUrl}
+                        alt={trip.destination}
+                        fill
+                        className="object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                        sizes="200px"
+                      />
                     )}
+                  </div>
 
-                    {/* Card content */}
-                    <div className="flex-1 p-5 space-y-2.5 min-w-0">
-                      <div>
-                        <h2 className="text-lg font-bold text-[#1A1A1A] leading-snug truncate pr-6">
-                          {trip.destination}
-                        </h2>
-                        <p className="text-xs text-[#9A9087] mt-0.5">
-                          {formatDate(trip.startDate)} → {formatDate(trip.endDate)}
+                  {/* Content */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 pr-6">
+                    <div>
+                      <h2
+                        className="italic text-[#1A1A1A] leading-snug"
+                        style={{
+                          fontFamily: 'Georgia, "Times New Roman", serif',
+                          fontSize: '1.375rem',
+                          fontWeight: 300,
+                        }}
+                      >
+                        {trip.destination}
+                      </h2>
+                      <p className="text-xs text-[#9A9087] mt-1.5">
+                        {formatShortDate(trip.startDate)} – {formatShortDate(trip.endDate)}{' '}
+                        {formatYear(trip.endDate)}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 space-y-1.5">
+                      {styleLabel && (
+                        <p
+                          className="text-[9px] font-medium uppercase"
+                          style={{ letterSpacing: '0.18em', color: '#C9683A' }}
+                        >
+                          {styleLabel}
                         </p>
-                      </div>
-
-                      {trip.styleTags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {trip.styleTags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="text-[10px] bg-stone-100 text-[#6B6B6B] px-2 py-0.5 rounded-full"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
                       )}
-
-                      <p className="text-xs text-[#9A9087]">
+                      <p
+                        className="text-[9px] font-medium uppercase text-[#B0A89C]"
+                        style={{ letterSpacing: '0.15em' }}
+                      >
                         {trip.places.length} place{trip.places.length !== 1 ? 's' : ''} curated
                       </p>
                     </div>
                   </div>
+
+                  {/* Delete — bare X, no background */}
+                  <button
+                    onClick={(e) => handleDelete(e, trip.id)}
+                    aria-label="Delete trip"
+                    className="absolute top-7 right-0 text-[#C0B8B0] hover:text-[#1A1A1A] transition-colors"
+                  >
+                    <X size={13} strokeWidth={1.5} />
+                  </button>
                 </div>
               )
             })}
           </div>
         )}
+
       </main>
     </div>
   )

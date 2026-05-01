@@ -83,7 +83,7 @@ export default function TripForm() {
       {/* Destination */}
       <div className="space-y-1.5">
         <label htmlFor="destination" className="block text-sm font-medium text-[#3D3830]">
-          Where are you going?
+          Where to?
         </label>
         <input
           id="destination"
