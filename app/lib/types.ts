@@ -312,4 +312,9 @@ export interface TripBundle {
   edges: TransitEdge[]
   day_blocks: DayBlock[]
   documents: TripDocument[]
+  /** Append-only audit trail of decision changes — written whenever a settled
+   *  decision is revisited and changed. Optional so bundles saved before this
+   *  feature existed still load. This is the "before state" the revisit impact
+   *  preview diffs against. */
+  decision_history?: DecisionHistory[]
 }

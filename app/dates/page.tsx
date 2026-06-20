@@ -50,12 +50,16 @@ export default function DatesPage() {
             >
               {check.status === 'too_broad'
                 ? `“${destination}” is a bit broad.`
-                : `We don’t have a confident read on ${destination} yet.`}
+                : check.status === 'component_place'
+                  ? `${check.place} is part of a ${check.region} trip.`
+                  : `We don’t have a confident read on ${destination} yet.`}
             </h1>
             <p className="text-[#6B6B6B] leading-relaxed">
               {check.status === 'too_broad'
                 ? 'Sherpa reasons within a country or region. Try a specific one — for v0 that’s Portugal.'
-                : 'Sherpa only gives a call when it can back it with real distances and a hand-checked read on the places. Right now that’s Portugal. We’d rather say so than guess.'}
+                : check.status === 'component_place'
+                  ? `It’s a stop or a day-trip Sherpa plans within a ${check.region} trip, not a destination on its own. Enter “${check.region}” and we’ll help you decide how much time it deserves.`
+                  : 'Sherpa only gives a call when it can back it with real distances and a hand-checked read on the places. Right now that’s Portugal. We’d rather say so than guess.'}
             </p>
             <button
               onClick={() => router.push('/')}

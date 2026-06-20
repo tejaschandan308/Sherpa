@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { buildDemoBundle, DEMO_TRIP_ID } from './lib/demoTrip'
 import { saveBundle } from './lib/store'
 import { writePlanning } from './lib/planning'
+import { checkDestination } from './lib/placeTiers'
 
 // A real, static example of Sherpa's core output: a stance with the rejected
 // alternative crossed out, plus the honest tradeoff. NOT a generic illustration
@@ -47,11 +48,33 @@ function ExampleDecisionCard() {
 export default function Home() {
   const router = useRouter()
   const [destination, setDestination] = useState('')
+  const [destError, setDestError] = useState<string | null>(null)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!destination.trim()) return
-    writePlanning({ destination: destination.trim() })
+    const dest = destination.trim()
+    if (!dest) return
+
+    // Catch a vague/unrecognized destination here so the user gets feedback
+    // immediately instead of after the dates step (Section 7 edge state).
+    const check = checkDestination(dest)
+    if (check.status === 'too_broad') {
+      setDestError(`“${dest}” is a bit broad — try a country or region. For v0 that’s Portugal.`)
+      return
+    }
+    if (check.status === 'component_place') {
+      setDestError(
+        `${check.place} is part of a ${check.region} trip, not a destination on its own — try “${check.region}” and we’ll help you decide how much time it deserves.`
+      )
+      return
+    }
+    if (check.status === 'unrecognized') {
+      setDestError(`We don’t have a confident read on “${dest}” yet. Right now that’s Portugal.`)
+      return
+    }
+
+    setDestError(null)
+    writePlanning({ destination: dest })
     router.push('/dates')
   }
 
@@ -103,7 +126,10 @@ export default function Home() {
                 type="text"
                 placeholder="e.g., Portugal"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
+                onChange={(e) => {
+                  setDestination(e.target.value)
+                  if (destError) setDestError(null)
+                }}
                 className="flex-1 rounded-lg border border-stone-300 px-4 py-2.5 text-[#1A1A1A] placeholder:text-stone-400 bg-white focus:outline-none focus:ring-2 focus:ring-stone-300 focus:border-transparent transition"
               />
               <button
@@ -113,6 +139,9 @@ export default function Home() {
                 Start
               </button>
             </div>
+            {destError && (
+              <p className="text-sm text-[#8F5B2D]">{destError}</p>
+            )}
             <button
               type="button"
               onClick={openExample}

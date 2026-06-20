@@ -141,6 +141,11 @@ export type DestinationCheck =
   | { status: 'supported' }
   | { status: 'too_broad' }
   | { status: 'unrecognized' }
+  // A place Sherpa knows, but only as a COMPONENT of a region trip (a leg or a
+  // day-trip), not a standalone destination. v0's decision types (base_city,
+  // region_cut, splurge_or_skip) all assume a multi-region trip, so a single
+  // sub-place can't be built around — we redirect the user to the region.
+  | { status: 'component_place'; place: string; region: string }
 
 /** Classifies a free-text destination for the dest+dates screen. */
 export function checkDestination(dest: string): DestinationCheck {
@@ -148,6 +153,9 @@ export function checkDestination(dest: string): DestinationCheck {
   if (!needle) return { status: 'unrecognized' }
   if (TOO_BROAD.includes(needle)) return { status: 'too_broad' }
   if (SUPPORTED_REGIONS.some((r) => normalize(r) === needle)) return { status: 'supported' }
-  if (isCuratedPlace(dest)) return { status: 'supported' }
+  // Known to the place-tier dataset but not a standalone destination: it's a
+  // component of its region's trip, so say so rather than claiming no data.
+  const entry = lookupPlaceTier(dest)
+  if (entry) return { status: 'component_place', place: entry.place, region: SUPPORTED_REGIONS[0] }
   return { status: 'unrecognized' }
 }

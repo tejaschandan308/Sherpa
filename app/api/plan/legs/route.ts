@@ -48,13 +48,53 @@ export async function POST(request: Request) {
 
     // Voice pass: one Claude call per leg, prose only. Captions that invent a
     // place/number are discarded inside generateLegCaptions.
+    //
+    // We enrich each call with read-only context derived ENTIRELY from the
+    // deterministic structure above (block order, leg sequence, transit edges)
+    // plus the confirmed pace — never by asking the generator to decide anything
+    // new. The voice pass reads this to write captions that differ day-to-day;
+    // it still cannot change night counts, ordering, or which blocks exist.
     const facts = await gatherFactsForCaptions()
+    const legCount = legs.length
     await Promise.all(
       legs.map(async (leg) => {
-        const blocks = dayBlocks.filter((b) => b.leg_id === leg.id)
+        // Blocks in their generated order — adjacency context depends on it.
+        const blocks = dayBlocks
+          .filter((b) => b.leg_id === leg.id)
+          .sort((a, b) => a.order - b.order)
+
+        // How you arrive into this leg, if a transit edge feeds it (e.g. the
+        // Lisbon→Porto train). First leg has none; omit it then.
+        const inbound = edges.find((e) => e.to_place === leg.place)
+        const arrival_from = inbound
+          ? {
+              place: inbound.from_place,
+              mode: inbound.mode,
+              duration_minutes: inbound.duration_minutes,
+            }
+          : undefined
+
         const result = await generateLegCaptions({
-          leg: { id: leg.id, place: leg.place, role: leg.role, nights: leg.nights },
-          blocks: blocks.map((b) => ({ id: b.id, kind: b.kind, target: b.target, note: b.note })),
+          leg: {
+            id: leg.id,
+            place: leg.place,
+            role: leg.role,
+            nights: leg.nights,
+            sequence_order: leg.sequence_order,
+            leg_count: legCount,
+            arrival_from,
+          },
+          blocks: blocks.map((b, i) => ({
+            id: b.id,
+            kind: b.kind,
+            target: b.target,
+            note: b.note,
+            day_index: i,
+            day_count: blocks.length,
+            prev_kind: i > 0 ? blocks[i - 1].kind : undefined,
+            next_kind: i < blocks.length - 1 ? blocks[i + 1].kind : undefined,
+          })),
+          pace,
           verified_facts: facts,
         })
         leg.caption = result.captions[leg.id]
