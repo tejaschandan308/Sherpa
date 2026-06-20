@@ -1,50 +1,68 @@
-import Link from 'next/link'
-import TripForm from './TripForm'
+'use client'
 
-// Layered mountain silhouette — decorative hero element
-function MountainIllustration() {
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { buildDemoBundle, DEMO_TRIP_ID } from './lib/demoTrip'
+import { saveBundle } from './lib/store'
+import { writePlanning } from './lib/planning'
+
+// A real, static example of Sherpa's core output: a stance with the rejected
+// alternative crossed out, plus the honest tradeoff. NOT a generic illustration
+// — the hero IS the product.
+function ExampleDecisionCard() {
   return (
-    <svg
-      viewBox="0 0 480 280"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="w-full"
-      aria-hidden="true"
-    >
-      {/* Distant range — lightest */}
-      <path
-        d="M0 280 L110 88 L192 168 L296 38 L392 118 L480 78 L480 280Z"
-        fill="#E4DFD6"
-      />
-      {/* Mid range */}
-      <path
-        d="M0 280 L78 152 L162 206 L264 98 L358 164 L480 128 L480 280Z"
-        fill="#D5CEBF"
-      />
-      {/* Foreground range — richest */}
-      <path
-        d="M0 280 L56 196 L144 230 L228 154 L314 200 L410 166 L480 184 L480 280Z"
-        fill="#C6BEB0"
-      />
-      {/* Winding trail */}
-      <path
-        d="M162 280 Q194 254 212 234 Q231 212 248 196 Q265 180 280 165"
-        stroke="#ADA69A"
-        strokeWidth="1.5"
-        fill="none"
-        strokeDasharray="5 4"
-        strokeLinecap="round"
-      />
-      {/* Hiker dot at trail end */}
-      <circle cx="280" cy="165" r="3.5" fill="#ADA69A" />
-    </svg>
+    <div className="rounded-xl border border-stone-200 bg-white p-6 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <p
+        className="text-[10px] font-medium uppercase text-[#B0A89C] mb-3"
+        style={{ letterSpacing: '0.2em' }}
+      >
+        The call
+      </p>
+      <h3
+        className="text-[#1A1A1A] text-2xl leading-snug mb-4"
+        style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+      >
+        Split Lisbon &amp; Porto.{' '}
+        <span className="text-[#B0A89C] line-through decoration-1">
+          Day-trip Porto from Lisbon.
+        </span>
+      </h3>
+      <div className="flex gap-3 border-t border-stone-200 pt-4">
+        <span
+          className="shrink-0 text-[10px] font-medium uppercase text-[#C9683A] pt-0.5"
+          style={{ letterSpacing: '0.15em', minWidth: '78px' }}
+        >
+          Tradeoff
+        </span>
+        <p className="text-sm text-[#5A554E] leading-relaxed">
+          Costs one hotel switch and a travel day. But day-tripping Porto means
+          ~6 hours of train for half a day on the ground.
+        </p>
+      </div>
+    </div>
   )
 }
 
 export default function Home() {
+  const router = useRouter()
+  const [destination, setDestination] = useState('')
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!destination.trim()) return
+    writePlanning({ destination: destination.trim() })
+    router.push('/dates')
+  }
+
+  function openExample() {
+    // Seed the Portugal demo and jump straight to its decisions.
+    saveBundle(buildDemoBundle())
+    router.push(`/trip/${DEMO_TRIP_ID}/decisions`)
+  }
+
   return (
     <main className="min-h-screen bg-[#FAFAF7]">
-
       {/* Editorial header strip */}
       <div className="px-6 py-3 flex items-center justify-between border-b border-stone-200">
         <span
@@ -62,38 +80,55 @@ export default function Home() {
         </Link>
       </div>
 
-      {/* Hero — headline + illustration */}
-      <section className="max-w-5xl mx-auto px-8 pt-12 pb-16 flex items-center gap-16">
-        <div className="flex-1">
-          <h1
-            className="text-5xl md:text-6xl text-[#1A1A1A] leading-[1.1] font-bold"
-          >
-            Skip the 14
+      <section className="max-w-5xl mx-auto px-8 pt-16 pb-20 grid md:grid-cols-2 gap-14 items-center">
+        {/* Left: pitch + input */}
+        <div>
+          <h1 className="text-4xl md:text-5xl text-[#1A1A1A] leading-[1.1] font-bold">
+            The few calls that
             <br />
-            browser tabs.
+            actually shape a trip.
           </h1>
-          <p className="mt-5 text-lg text-[#6B6B6B] leading-relaxed max-w-sm">
-            Tell me where. I&rsquo;ll tell you what&rsquo;s worth it.
+          <p className="mt-5 text-lg text-[#6B6B6B] leading-relaxed max-w-md">
+            Not a list of places. Sherpa surfaces what to cut, what to split,
+            what to skip — each with the honest tradeoff — then lays out the days.
           </p>
+
+          <form onSubmit={handleSubmit} className="mt-8 space-y-3">
+            <label htmlFor="destination" className="block text-sm font-medium text-[#3D3830]">
+              Where are you going?
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="destination"
+                type="text"
+                placeholder="e.g., Portugal"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                className="flex-1 rounded-lg border border-stone-300 px-4 py-2.5 text-[#1A1A1A] placeholder:text-stone-400 bg-white focus:outline-none focus:ring-2 focus:ring-stone-300 focus:border-transparent transition"
+              />
+              <button
+                type="submit"
+                className="bg-[#B07242] text-white font-medium px-5 py-2.5 rounded-lg hover:bg-[#8F5B2D] active:bg-[#7A4A22] transition"
+              >
+                Start
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={openExample}
+              className="text-[11px] font-medium uppercase hover:opacity-70 transition-opacity"
+              style={{ letterSpacing: '0.15em', color: '#C9683A' }}
+            >
+              Or walk through the Portugal example →
+            </button>
+          </form>
         </div>
 
-        {/* Illustration: decorative, hidden on small screens */}
-        <div className="hidden lg:block w-80 xl:w-96 flex-shrink-0 opacity-90">
-          <MountainIllustration />
+        {/* Right: the real example card */}
+        <div className="md:pl-4">
+          <ExampleDecisionCard />
         </div>
       </section>
-
-      {/* Form section */}
-      <section className="max-w-xl mx-auto px-8 pb-24">
-        <p
-          className="text-[10px] font-medium text-[#999] uppercase mb-6"
-          style={{ letterSpacing: '0.2em' }}
-        >
-          Plan your trip
-        </p>
-        <TripForm />
-      </section>
-
     </main>
   )
 }
